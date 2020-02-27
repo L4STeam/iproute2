@@ -807,6 +807,15 @@ struct dctcpstat {
 	bool		enabled;
 };
 
+struct praguestat {
+	uint64_t alpha;
+	uint64_t ai_ack_increase;
+	uint32_t max_burst;
+	uint32_t round;
+	uint32_t rtt_indep;
+	bool enabled;
+};
+
 struct tcpstat {
 	struct sockstat	    ss;
 	unsigned int	    timer;
@@ -865,6 +874,7 @@ struct tcpstat {
 	bool		    app_limited;
 	struct dctcpstat    *dctcp;
 	struct tcp_bbr_info *bbr_info;
+	struct praguestat   *prague;
 };
 
 /* SCTP assocs share the same inode number with their parent endpoint. So if we
@@ -937,6 +947,22 @@ static const char *tipc_netid_name(int type)
 		return "ti_rd";
 	case SOCK_SEQPACKET:
 		return "ti_sq";
+	default:
+		return "???";
+	}
+}
+
+static const char *prague_rtt_indep_mode(uint32_t rtt_indep)
+{
+	switch(rtt_indep) {
+	case 0:
+		return "disabled";
+	case 1:
+		return "rate";
+	case 2:
+		return "scalable";
+	case 3:
+		return "additive";
 	default:
 		return "???";
 	}
@@ -2568,6 +2594,19 @@ static void tcp_stats_print(struct tcpstat *s)
 		out(" dctcp:fallback_mode");
 	}
 
+	if (s->prague && s->prague->enabled) {
+		struct praguestat *prague = s->prague;
+
+		out(" prague:(alpha:%g%%,ai_ack_increase:%g%%,max_burst:%u,"
+		    "round:%u,rtt_indep:%s)",
+		    (double)prague->alpha / (double)(1ULL << 20U) * 100.0f,
+		    (double)prague->ai_ack_increase / (double)(1ULL << 20) *
+		    100.0f, prague->max_burst, prague->round,
+		    prague_rtt_indep_mode(prague->rtt_indep));
+	} else if (s->prague) {
+		out(" prague:reno-fallback-mode");
+	}
+
 	if (s->bbr_info) {
 		__u64 bw;
 
@@ -3040,6 +3079,22 @@ static void tcp_show_info(const struct nlmsghdr *nlh, struct inet_diag_msg *r,
 			s.dctcp		= dctcp;
 		}
 
+		if (tb[INET_DIAG_PRAGUEINFO]) {
+			struct praguestat *prague = malloc(sizeof(struct
+								  praguestat));
+
+			const struct tcp_prague_info *pinfo
+				= RTA_DATA(tb[INET_DIAG_PRAGUEINFO]);
+
+			prague->enabled	= !!pinfo->prague_enabled;
+			prague->alpha	= pinfo->prague_alpha;
+			prague->ai_ack_increase = pinfo->prague_ai_ack_increase;
+			prague->max_burst = pinfo->prague_max_burst;
+			prague->round = pinfo->prague_round;
+			prague->rtt_indep = pinfo->prague_rtt_indep;
+			s.prague	= prague;
+		}
+
 		if (tb[INET_DIAG_BBRINFO]) {
 			const void *bbr_info = RTA_DATA(tb[INET_DIAG_BBRINFO]);
 			int len = min(RTA_PAYLOAD(tb[INET_DIAG_BBRINFO]),
@@ -3086,6 +3141,7 @@ static void tcp_show_info(const struct nlmsghdr *nlh, struct inet_diag_msg *r,
 		tcp_stats_print(&s);
 		free(s.dctcp);
 		free(s.bbr_info);
+		free(s.prague);
 	}
 	if (tb[INET_DIAG_MD5SIG]) {
 		struct tcp_diag_md5sig *sig = RTA_DATA(tb[INET_DIAG_MD5SIG]);

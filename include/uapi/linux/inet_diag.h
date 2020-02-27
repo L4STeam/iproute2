@@ -76,7 +76,7 @@ enum {
  * to offset cc+"yes" or to offset cc+"no". "yes" is supposed to be
  * length of the command and its arguments.
  */
- 
+
 struct inet_diag_bc_op {
 	unsigned char	code;
 	unsigned char	yes;
@@ -158,6 +158,7 @@ enum {
 	INET_DIAG_CLASS_ID,	/* request as INET_DIAG_TCLASS */
 	INET_DIAG_MD5SIG,
 	INET_DIAG_ULP_INFO,
+	INET_DIAG_PRAGUEINFO, /* TODO(otilmans) this will need to be pushe down once we upgrade the kernel. */
 	INET_DIAG_SK_BPF_STORAGES,
 	INET_DIAG_CGROUP_ID,
 	INET_DIAG_SOCKOPT,
@@ -231,9 +232,19 @@ struct tcp_bbr_info {
 	__u32	bbr_cwnd_gain;		/* cwnd gain shifted left 8 bits */
 };
 
+struct tcp_prague_info {
+	__u64	prague_alpha;
+	__u64	prague_ai_ack_increase;
+	__u32	prague_max_burst;
+	__u32	prague_round;
+	__u32	prague_rtt_indep;
+	bool	prague_enabled;
+};
+
 union tcp_cc_info {
 	struct tcpvegas_info	vegas;
 	struct tcp_dctcp_info	dctcp;
 	struct tcp_bbr_info	bbr;
+	struct tcp_prague_info	prague;
 };
 #endif /* _INET_DIAG_H_ */
