@@ -1,0 +1,46 @@
+name: Build deb package
+
+on: [push]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v1
+    - name: Download apt-get dependencies
+      run: |
+        sudo env DEBIAN_FRONTEND=noninteractive apt-get -y purge unattended-upgrades
+        sudo env DEBIAN_FRONTEND=noninteractive apt-get -y update
+        sudo env DEBIAN_FRONTEND=noninteractive apt-get -y install devscripts debhelper-compat libbsd-dev
+    - name: Enable src repos
+      run: |
+        sudo sed -i 's/# deb-src/deb-src/' /etc/apt/sources.list
+        sudo apt update
+    - name: Import debian rules
+      run: |
+        git remote add debian $(debcheckout -d iproute2 | awk '/url/{print $2;}')
+        git fetch debian
+        git checkout debian/$(git describe --abbrev=0 | tr -d 'v')-1 -- debian
+        sudo apt build-dep iproute2
+    - name: Build deb
+      run: dpkg-buildpackage -b -rfakeroot -us -uc -d
+    - name: Zip artifacts
+      run: |
+        mkdir -p iproute2-l4s
+        mv -t iproute2-l4s ../*.deb
+        zip -r iproute2-l4s.zip iproute2-l4s
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v1
+      with:
+        name: iproute2-l4s
+        path: iproute2-l4s
+    - name: Release tip build
+      uses: eine/tip@master
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        tag: master-build
+        files: |
+          iproute2-l4s.zip
