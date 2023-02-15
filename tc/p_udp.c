@@ -1,13 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * m_pedit_udp.c	packet editor: UDP header
  *
- *		This program is free software; you can distribute it and/or
- *		modify it under the terms of the GNU General Public License
- *		as published by the Free Software Foundation; either version
- *		2 of the License, or (at your option) any later version.
- *
  * Authors:  J Hadi Salim (hadi@cyberus.ca)
- *
  */
 
 #include <stdio.h>
@@ -41,14 +36,14 @@ parse_udp(int *argc_p, char ***argv_p,
 	if (strcmp(*argv, "sport") == 0) {
 		NEXT_ARG();
 		tkey->off = 0;
-		res = parse_cmd(&argc, &argv, 2, TU32, RU16, sel, tkey);
+		res = parse_cmd(&argc, &argv, 2, TU32, RU16, sel, tkey, 0);
 		goto done;
 	}
 
 	if (strcmp(*argv, "dport") == 0) {
 		NEXT_ARG();
 		tkey->off = 2;
-		res = parse_cmd(&argc, &argv, 2, TU32, RU16, sel, tkey);
+		res = parse_cmd(&argc, &argv, 2, TU32, RU16, sel, tkey, 0);
 		goto done;
 	}
 

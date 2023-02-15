@@ -1,10 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * tc_qdisc.c		"tc qdisc".
- *
- *		This program is free software; you can redistribute it and/or
- *		modify it under the terms of the GNU General Public License
- *		as published by the Free Software Foundation; either version
- *		2 of the License, or (at your option) any later version.
  *
  * Authors:	Alexey Kuznetsov, <kuznet@ms2.inr.ac.ru>
  *		J Hadi Salim: Extension to ingress
@@ -329,7 +325,7 @@ int print_qdisc(struct nlmsghdr *n, void *arg)
 	print_nl();
 
 	if (show_details && tb[TCA_STAB]) {
-		print_size_table(fp, " ", tb[TCA_STAB]);
+		print_size_table(tb[TCA_STAB]);
 		print_nl();
 	}
 
@@ -346,6 +342,8 @@ int print_qdisc(struct nlmsghdr *n, void *arg)
 			print_nl();
 		}
 	}
+
+	print_ext_msg(tb);
 	close_json_object();
 	fflush(fp);
 	return 0;

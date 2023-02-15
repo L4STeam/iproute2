@@ -1,23 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright (C)2006 USAGI/WIDE Project
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, see <http://www.gnu.org/licenses>.
- */
-/*
  * split from ip_tunnel.c
- */
-/*
+ *
  * Author:
  *	Masahide NAKAMURA @USAGI
  */
@@ -298,14 +284,8 @@ void tnl_print_endpoint(const char *name, const struct rtattr *rta, int family)
 			value = "unknown";
 	}
 
-	if (is_json_context()) {
-		print_string(PRINT_JSON, name, NULL, value);
-	} else {
-		SPRINT_BUF(b1);
-
-		snprintf(b1, sizeof(b1), "%s %%s ", name);
-		print_string(PRINT_FP, NULL, b1, value);
-	}
+	print_string_name_value(name, value);
+	print_string(PRINT_FP, NULL, " ", NULL);
 }
 
 void tnl_print_gre_flags(__u8 proto,

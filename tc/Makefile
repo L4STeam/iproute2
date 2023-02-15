@@ -16,7 +16,6 @@ TCMODULES += q_prio.o
 TCMODULES += q_skbprio.o
 TCMODULES += q_tbf.o
 TCMODULES += q_cbq.o
-TCMODULES += q_rr.o
 TCMODULES += q_multiq.o
 TCMODULES += q_netem.o
 TCMODULES += q_choke.o

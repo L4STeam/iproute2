@@ -1,10 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * iplink_bond.c	Bonding device support
- *
- *              This program is free software; you can redistribute it and/or
- *              modify it under the terms of the GNU General Public License
- *              as published by the Free Software Foundation; either version
- *              2 of the License, or (at your option) any later version.
  *
  * Authors:     Jiri Pirko <jiri@resnulli.us>
  *              Scott Feldman <sfeldma@cumulusnetworks.com>
@@ -15,12 +11,14 @@
 #include <string.h>
 #include <linux/if_bonding.h>
 
+#include "list.h"
 #include "rt_names.h"
 #include "utils.h"
 #include "ip_common.h"
 #include "json_print.h"
 
 #define BOND_MAX_ARP_TARGETS    16
+#define BOND_MAX_NS_TARGETS     BOND_MAX_ARP_TARGETS
 
 static unsigned int xstats_print_attr;
 static int filter_index;
@@ -41,6 +39,9 @@ static const char *arp_validate_tbl[] = {
 	"active",
 	"backup",
 	"all",
+	"filter",
+	"filter_active",
+	"filter_backup",
 	NULL,
 };
 
@@ -71,6 +72,12 @@ static const char *xmit_hash_policy_tbl[] = {
 	"encap2+3",
 	"encap3+4",
 	"vlan+srcmac",
+	NULL,
+};
+
+static const char *lacp_active_tbl[] = {
+	"off",
+	"on",
 	NULL,
 };
 
@@ -127,6 +134,7 @@ static void print_explain(FILE *f)
 		"                [ arp_validate ARP_VALIDATE ]\n"
 		"                [ arp_all_targets ARP_ALL_TARGETS ]\n"
 		"                [ arp_ip_target [ ARP_IP_TARGET, ... ] ]\n"
+		"                [ ns_ip6_target [ NS_IP6_TARGET, ... ] ]\n"
 		"                [ primary SLAVE_DEV ]\n"
 		"                [ primary_reselect PRIMARY_RESELECT ]\n"
 		"                [ fail_over_mac FAIL_OVER_MAC ]\n"
@@ -139,17 +147,20 @@ static void print_explain(FILE *f)
 		"                [ packets_per_slave PACKETS_PER_SLAVE ]\n"
 		"                [ tlb_dynamic_lb TLB_DYNAMIC_LB ]\n"
 		"                [ lacp_rate LACP_RATE ]\n"
+		"                [ lacp_active LACP_ACTIVE]\n"
 		"                [ ad_select AD_SELECT ]\n"
 		"                [ ad_user_port_key PORTKEY ]\n"
 		"                [ ad_actor_sys_prio SYSPRIO ]\n"
 		"                [ ad_actor_system LLADDR ]\n"
+		"                [ arp_missed_max MISSED_MAX ]\n"
 		"\n"
 		"BONDMODE := balance-rr|active-backup|balance-xor|broadcast|802.3ad|balance-tlb|balance-alb\n"
-		"ARP_VALIDATE := none|active|backup|all\n"
+		"ARP_VALIDATE := none|active|backup|all|filter|filter_active|filter_backup\n"
 		"ARP_ALL_TARGETS := any|all\n"
 		"PRIMARY_RESELECT := always|better|failure\n"
 		"FAIL_OVER_MAC := none|active|follow\n"
 		"XMIT_HASH_POLICY := layer2|layer2+3|layer3+4|encap2+3|encap3+4|vlan+srcmac\n"
+		"LACP_ACTIVE := off|on\n"
 		"LACP_RATE := slow|fast\n"
 		"AD_SELECT := stable|bandwidth|count\n"
 	);
@@ -165,11 +176,12 @@ static int bond_parse_opt(struct link_util *lu, int argc, char **argv,
 {
 	__u8 mode, use_carrier, primary_reselect, fail_over_mac;
 	__u8 xmit_hash_policy, num_peer_notif, all_slaves_active;
-	__u8 lacp_rate, ad_select, tlb_dynamic_lb;
+	__u8 lacp_active, lacp_rate, ad_select, tlb_dynamic_lb;
 	__u16 ad_user_port_key, ad_actor_sys_prio;
 	__u32 miimon, updelay, downdelay, peer_notify_delay, arp_interval, arp_validate;
 	__u32 arp_all_targets, resend_igmp, min_links, lp_interval;
 	__u32 packets_per_slave;
+	__u8 missed_max;
 	unsigned int ifindex;
 
 	while (argc > 0) {
@@ -235,6 +247,25 @@ static int bond_parse_opt(struct link_util *lu, int argc, char **argv,
 				addattr_nest_end(n, nest);
 			}
 			addattr_nest_end(n, nest);
+		} else if (strcmp(*argv, "ns_ip6_target") == 0) {
+			struct rtattr *nest = addattr_nest(n, 1024,
+				IFLA_BOND_NS_IP6_TARGET);
+			if (NEXT_ARG_OK()) {
+				NEXT_ARG();
+				char *targets = strdupa(*argv);
+				char *target = strtok(targets, ",");
+				int i;
+
+				for (i = 0; target && i < BOND_MAX_NS_TARGETS; i++) {
+					inet_prefix ip6_addr;
+
+					get_addr(&ip6_addr, target, AF_INET6);
+					addattr_l(n, 1024, i, ip6_addr.data, sizeof(struct in6_addr));
+					target = strtok(NULL, ",");
+				}
+				addattr_nest_end(n, nest);
+			}
+			addattr_nest_end(n, nest);
 		} else if (matches(*argv, "arp_validate") == 0) {
 			NEXT_ARG();
 			if (get_index(arp_validate_tbl, *argv) < 0)
@@ -247,6 +278,12 @@ static int bond_parse_opt(struct link_util *lu, int argc, char **argv,
 				invarg("invalid arp_all_targets", *argv);
 			arp_all_targets = get_index(arp_all_targets_tbl, *argv);
 			addattr32(n, 1024, IFLA_BOND_ARP_ALL_TARGETS, arp_all_targets);
+		} else if (strcmp(*argv, "arp_missed_max") == 0) {
+			NEXT_ARG();
+			if (get_u8(&missed_max, *argv, 0))
+				invarg("invalid arp_missed_max", *argv);
+
+			addattr8(n, 1024, IFLA_BOND_MISSED_MAX, missed_max);
 		} else if (matches(*argv, "primary") == 0) {
 			NEXT_ARG();
 			ifindex = ll_name_to_index(*argv);
@@ -323,6 +360,13 @@ static int bond_parse_opt(struct link_util *lu, int argc, char **argv,
 
 			lacp_rate = get_index(lacp_rate_tbl, *argv);
 			addattr8(n, 1024, IFLA_BOND_AD_LACP_RATE, lacp_rate);
+		} else if (strcmp(*argv, "lacp_active") == 0) {
+			NEXT_ARG();
+			if (get_index(lacp_active_tbl, *argv) < 0)
+				invarg("invalid lacp_active", *argv);
+
+			lacp_active = get_index(lacp_active_tbl, *argv);
+			addattr8(n, 1024, IFLA_BOND_AD_LACP_ACTIVE, lacp_active);
 		} else if (matches(*argv, "ad_select") == 0) {
 			NEXT_ARG();
 			if (get_index(ad_select_tbl, *argv) < 0)
@@ -378,6 +422,8 @@ static int bond_parse_opt(struct link_util *lu, int argc, char **argv,
 
 static void bond_print_opt(struct link_util *lu, FILE *f, struct rtattr *tb[])
 {
+	int i;
+
 	if (!tb)
 		return;
 
@@ -435,9 +481,14 @@ static void bond_print_opt(struct link_util *lu, FILE *f, struct rtattr *tb[])
 			   "arp_interval %u ",
 			   rta_getattr_u32(tb[IFLA_BOND_ARP_INTERVAL]));
 
+	if (tb[IFLA_BOND_MISSED_MAX])
+		print_uint(PRINT_ANY,
+			   "arp_missed_max",
+			   "arp_missed_max %u ",
+			   rta_getattr_u8(tb[IFLA_BOND_MISSED_MAX]));
+
 	if (tb[IFLA_BOND_ARP_IP_TARGET]) {
 		struct rtattr *iptb[BOND_MAX_ARP_TARGETS + 1];
-		int i;
 
 		parse_rtattr_nested(iptb, BOND_MAX_ARP_TARGETS,
 				    tb[IFLA_BOND_ARP_IP_TARGET]);
@@ -460,6 +511,35 @@ static void bond_print_opt(struct link_util *lu, FILE *f, struct rtattr *tb[])
 		}
 
 		if (iptb[0]) {
+			print_string(PRINT_FP, NULL, " ", NULL);
+			close_json_array(PRINT_JSON, NULL);
+		}
+	}
+
+	if (tb[IFLA_BOND_NS_IP6_TARGET]) {
+		struct rtattr *ip6tb[BOND_MAX_NS_TARGETS + 1];
+
+		parse_rtattr_nested(ip6tb, BOND_MAX_NS_TARGETS,
+				    tb[IFLA_BOND_NS_IP6_TARGET]);
+
+		if (ip6tb[0]) {
+			open_json_array(PRINT_JSON, "ns_ip6_target");
+			print_string(PRINT_FP, NULL, "ns_ip6_target ", NULL);
+		}
+
+		for (i = 0; i < BOND_MAX_NS_TARGETS; i++) {
+			if (ip6tb[i])
+				print_string(PRINT_ANY,
+					     NULL,
+					     "%s",
+					     rt_addr_n2a_rta(AF_INET6, ip6tb[i]));
+			if (!is_json_context()
+			    && i < BOND_MAX_NS_TARGETS-1
+			    && ip6tb[i+1])
+				fprintf(f, ",");
+		}
+
+		if (ip6tb[0]) {
 			print_string(PRINT_FP, NULL, " ", NULL);
 			close_json_array(PRINT_JSON, NULL);
 		}
@@ -560,6 +640,15 @@ static void bond_print_opt(struct link_util *lu, FILE *f, struct rtattr *tb[])
 			   "packets_per_slave",
 			   "packets_per_slave %u ",
 			   rta_getattr_u32(tb[IFLA_BOND_PACKETS_PER_SLAVE]));
+
+	if (tb[IFLA_BOND_AD_LACP_ACTIVE]) {
+		const char *lacp_active = get_name(lacp_active_tbl,
+						   rta_getattr_u8(tb[IFLA_BOND_AD_LACP_ACTIVE]));
+		print_string(PRINT_ANY,
+			     "ad_lacp_active",
+			     "lacp_active %s ",
+			     lacp_active);
+	}
 
 	if (tb[IFLA_BOND_AD_LACP_RATE]) {
 		const char *lacp_rate = get_name(lacp_rate_tbl,
@@ -669,7 +758,7 @@ static void bond_print_xstats_help(struct link_util *lu, FILE *f)
 	fprintf(f, "Usage: ... %s [ 802.3ad ] [ dev DEVICE ]\n", lu->id);
 }
 
-static void bond_print_3ad_stats(struct rtattr *lacpattr)
+static void bond_print_3ad_stats(const struct rtattr *lacpattr)
 {
 	struct rtattr *lacptb[BOND_3AD_STAT_MAX+1];
 	__u64 val;
@@ -820,7 +909,6 @@ int bond_parse_xstats(struct link_util *lu, int argc, char **argv)
 	return 0;
 }
 
-
 struct link_util bond_link_util = {
 	.id		= "bond",
 	.maxattr	= IFLA_BOND_MAX,
@@ -829,4 +917,48 @@ struct link_util bond_link_util = {
 	.print_help	= bond_print_help,
 	.parse_ifla_xstats = bond_parse_xstats,
 	.print_ifla_xstats = bond_print_xstats,
+};
+
+static const struct ipstats_stat_desc_xstats
+ipstats_stat_desc_xstats_bond_lacp = {
+	.desc = IPSTATS_STAT_DESC_XSTATS_LEAF("802.3ad"),
+	.xstats_at = IFLA_STATS_LINK_XSTATS,
+	.link_type_at = LINK_XSTATS_TYPE_BOND,
+	.inner_max = BOND_XSTATS_MAX,
+	.inner_at = BOND_XSTATS_3AD,
+	.show_cb = &bond_print_3ad_stats,
+};
+
+static const struct ipstats_stat_desc *
+ipstats_stat_desc_xstats_bond_subs[] = {
+	&ipstats_stat_desc_xstats_bond_lacp.desc,
+};
+
+const struct ipstats_stat_desc ipstats_stat_desc_xstats_bond_group = {
+	.name = "bond",
+	.kind = IPSTATS_STAT_DESC_KIND_GROUP,
+	.subs = ipstats_stat_desc_xstats_bond_subs,
+	.nsubs = ARRAY_SIZE(ipstats_stat_desc_xstats_bond_subs),
+};
+
+static const struct ipstats_stat_desc_xstats
+ipstats_stat_desc_xstats_slave_bond_lacp = {
+	.desc = IPSTATS_STAT_DESC_XSTATS_LEAF("802.3ad"),
+	.xstats_at = IFLA_STATS_LINK_XSTATS_SLAVE,
+	.link_type_at = LINK_XSTATS_TYPE_BOND,
+	.inner_max = BOND_XSTATS_MAX,
+	.inner_at = BOND_XSTATS_3AD,
+	.show_cb = &bond_print_3ad_stats,
+};
+
+static const struct ipstats_stat_desc *
+ipstats_stat_desc_xstats_slave_bond_subs[] = {
+	&ipstats_stat_desc_xstats_slave_bond_lacp.desc,
+};
+
+const struct ipstats_stat_desc ipstats_stat_desc_xstats_slave_bond_group = {
+	.name = "bond",
+	.kind = IPSTATS_STAT_DESC_KIND_GROUP,
+	.subs = ipstats_stat_desc_xstats_slave_bond_subs,
+	.nsubs = ARRAY_SIZE(ipstats_stat_desc_xstats_slave_bond_subs),
 };

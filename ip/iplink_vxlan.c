@@ -1,10 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * iplink_vxlan.c	VXLAN device support
- *
- *              This program is free software; you can redistribute it and/or
- *              modify it under the terms of the GNU General Public License
- *              as published by the Free Software Foundation; either version
- *              2 of the License, or (at your option) any later version.
  *
  * Authors:     Stephen Hemminger <shemminger@vyatta.com
  */
@@ -48,6 +44,7 @@ static void print_explain(FILE *f)
 		"		[ [no]udp6zerocsumrx ]\n"
 		"		[ [no]remcsumtx ] [ [no]remcsumrx ]\n"
 		"		[ [no]external ] [ gbp ] [ gpe ]\n"
+		"		[ [no]vnifilter ]\n"
 		"\n"
 		"Where:	VNI	:= 0-16777215\n"
 		"	ADDR	:= { IP_ADDRESS | any }\n"
@@ -81,6 +78,7 @@ static int vxlan_parse_opt(struct link_util *lu, int argc, char **argv,
 	__u8 learning = 1;
 	__u16 dstport = 0;
 	__u8 metadata = 0;
+	__u8 vnifilter = 0;
 	__u64 attrs = 0;
 	bool set_op = (n->nlmsg_type == RTM_NEWLINK &&
 		       !(n->nlmsg_flags & NLM_F_CREATE));
@@ -330,6 +328,15 @@ static int vxlan_parse_opt(struct link_util *lu, int argc, char **argv,
 		} else if (!matches(*argv, "gpe")) {
 			check_duparg(&attrs, IFLA_VXLAN_GPE, *argv, *argv);
 			addattr_l(n, 1024, IFLA_VXLAN_GPE, NULL, 0);
+		} else if (!strcmp(*argv, "vnifilter")) {
+			check_duparg(&attrs, IFLA_VXLAN_VNIFILTER,
+				     *argv, *argv);
+			addattr8(n, 1024, IFLA_VXLAN_VNIFILTER, 1);
+			vnifilter = 1;
+		} else if (!strcmp(*argv, "novnifilter")) {
+			check_duparg(&attrs, IFLA_VXLAN_VNIFILTER,
+				     *argv, *argv);
+			addattr8(n, 1024, IFLA_VXLAN_VNIFILTER, 0);
 		} else if (matches(*argv, "help") == 0) {
 			explain();
 			return -1;
@@ -341,12 +348,17 @@ static int vxlan_parse_opt(struct link_util *lu, int argc, char **argv,
 		argc--, argv++;
 	}
 
+	if (!metadata && vnifilter) {
+		fprintf(stderr, "vxlan: vnifilter is valid only when 'external' is set\n");
+		return -1;
+	}
+
 	if (metadata && VXLAN_ATTRSET(attrs, IFLA_VXLAN_ID)) {
 		fprintf(stderr, "vxlan: both 'external' and vni cannot be specified\n");
 		return -1;
 	}
 
-	if (!metadata && !VXLAN_ATTRSET(attrs, IFLA_VXLAN_ID) && !set_op) {
+	if (!metadata && !vnifilter && !VXLAN_ATTRSET(attrs, IFLA_VXLAN_ID) && !set_op) {
 		fprintf(stderr, "vxlan: missing virtual network identifier\n");
 		return -1;
 	}
@@ -408,7 +420,6 @@ static int vxlan_parse_opt(struct link_util *lu, int argc, char **argv,
 
 static void vxlan_print_opt(struct link_util *lu, FILE *f, struct rtattr *tb[])
 {
-	__u32 vni;
 	__u8 ttl = 0;
 	__u8 tos = 0;
 	__u32 maxaddr;
@@ -419,15 +430,17 @@ static void vxlan_print_opt(struct link_util *lu, FILE *f, struct rtattr *tb[])
 	if (tb[IFLA_VXLAN_COLLECT_METADATA] &&
 	    rta_getattr_u8(tb[IFLA_VXLAN_COLLECT_METADATA])) {
 		print_bool(PRINT_ANY, "external", "external ", true);
-		return;
 	}
 
-	if (!tb[IFLA_VXLAN_ID] ||
-	    RTA_PAYLOAD(tb[IFLA_VXLAN_ID]) < sizeof(__u32))
-		return;
+	if (tb[IFLA_VXLAN_VNIFILTER] &&
+	    rta_getattr_u8(tb[IFLA_VXLAN_VNIFILTER])) {
+		print_bool(PRINT_ANY, "vnifilter", "vnifilter", true);
+	}
 
-	vni = rta_getattr_u32(tb[IFLA_VXLAN_ID]);
-	print_uint(PRINT_ANY, "id", "id %u ", vni);
+	if (tb[IFLA_VXLAN_ID] &&
+	    RTA_PAYLOAD(tb[IFLA_VXLAN_ID]) >= sizeof(__u32)) {
+		print_uint(PRINT_ANY, "id", "id %u ", rta_getattr_u32(tb[IFLA_VXLAN_ID]));
+	}
 
 	if (tb[IFLA_VXLAN_GROUP]) {
 		__be32 addr = rta_getattr_u32(tb[IFLA_VXLAN_GROUP]);

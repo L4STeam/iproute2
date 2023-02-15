@@ -1,3 +1,4 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /* lnstat - Unified linux network statistics
  *
  * Copyright (C) 2004 by Harald Welte <laforge@gnumonks.org>
@@ -8,12 +9,6 @@
  *
  * Copyright 2001 by Robert Olsson <robert.olsson@its.uu.se>
  *                                 Uppsala University, Sweden
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
  */
 
 /* Maximum number of fields that can be displayed */
@@ -210,8 +205,9 @@ static struct table_hdr *build_hdr_string(struct lnstat_file *lnstat_files,
 		}
 		ofs += width+1;
 	}
+
 	/* fill in spaces */
-	for (h = 1; h <= th.num_lines; h++) {
+	for (h = 1; h < th.num_lines; h++) {
 		for (i = 0; i < ofs; i++) {
 			if (th.hdr[h][i] == '\0')
 				th.hdr[h][i] = ' ';
@@ -330,6 +326,7 @@ int main(int argc, char **argv)
 				for (i = 0; i < MAX_FIELDS; i++)
 					fp.params[i].print.width = len;
 			}
+			free(tmp);
 			break;
 		default:
 			usage(argv[0], 1);

@@ -137,7 +137,7 @@ memory.
 The memory allocated for sending packet (which has not been sent to layer 3)
 .P
 .TP
-.B <ropt_mem>
+.B <opt_mem>
 The memory used for storing socket option, e.g., the key for TCP MD5 signature
 .P
 .TP
@@ -154,6 +154,10 @@ the number of packets dropped before they are de-multiplexed into the socket
 .TP
 .B \-p, \-\-processes
 Show process using socket.
+.TP
+.B \-T, \-\-threads
+Show thread using socket. Implies
+.BR \-p .
 .TP
 .B \-i, \-\-info
 Show internal TCP information. Below fields may appear:
@@ -295,6 +299,11 @@ Show cgroup information. Below fields may appear:
 Cgroup v2 pathname. This pathname is relative to the mount point of the hierarchy.
 .RE
 .TP
+.B \-\-tipcinfo
+Show internal tipc socket information.
+.RS
+.P
+.TP
 .B \-K, \-\-kill
 Attempts to forcibly close sockets. This option displays sockets that are
 successfully closed and silently skips sockets that the kernel does not support
@@ -311,7 +320,9 @@ Continually display sockets as they are destroyed
 .B \-Z, \-\-context
 As the
 .B \-p
-option but also shows process security context.
+option but also shows process security context. If the
+.B \-T
+option is used, also shows thread security context.
 .sp
 For
 .BR netlink (7)
@@ -343,7 +354,7 @@ and is therefore a useful reference.
 Switch to the specified network namespace name.
 .TP
 .B \-b, \-\-bpf
-Show socket BPF filters (only administrators are allowed to get these
+Show socket classic BPF filters (only administrators are allowed to get these
 information).
 .TP
 .B \-4, \-\-ipv4
@@ -373,24 +384,31 @@ Display Unix domain sockets (alias for -f unix).
 .B \-S, \-\-sctp
 Display SCTP sockets.
 .TP
+.B \-\-tipc
+Display tipc sockets (alias for -f tipc).
+.TP
+.TP
 .B \-\-vsock
 Display vsock sockets (alias for -f vsock).
 .TP
 .B \-\-xdp
 Display XDP sockets (alias for -f xdp).
 .TP
+.B \-M, \-\-mptcp
+Display MPTCP sockets.
+.TP
 .B \-\-inet-sockopt
 Display inet socket options.
 .TP
 .B \-f FAMILY, \-\-family=FAMILY
 Display sockets of type FAMILY.  Currently the following families are
-supported: unix, inet, inet6, link, netlink, vsock, xdp.
+supported: unix, inet, inet6, link, netlink, vsock, tipc, xdp.
 .TP
 .B \-A QUERY, \-\-query=QUERY, \-\-socket=QUERY
 List of socket tables to dump, separated by commas. The following identifiers
 are understood: all, inet, tcp, udp, raw, unix, packet, netlink, unix_dgram,
-unix_stream, unix_seqpacket, packet_raw, packet_dgram, dccp, sctp,
-vsock_stream, vsock_dgram, xdp Any item in the list may optionally be
+unix_stream, unix_seqpacket, packet_raw, packet_dgram, dccp, sctp, tipc,
+vsock_stream, vsock_dgram, xdp, mptcp. Any item in the list may optionally be
 prefixed by an exclamation mark
 .RB ( ! )
 to exclude that socket table from being dumped.
@@ -409,7 +427,7 @@ Please take a look at the official documentation for details regarding filters.
 .SH STATE-FILTER
 
 .B STATE-FILTER
-allows to construct arbitrary set of states to match. Its syntax is
+allows one to construct arbitrary set of states to match. Its syntax is
 sequence of keywords state and exclude followed by identifier of
 state.
 .TP

@@ -1,25 +1,9 @@
-/* $USAGI: $ */
-
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright (C)2004 USAGI/WIDE Project
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, see <http://www.gnu.org/licenses>.
- */
-/*
  * based on iproute.c
- */
-/*
+ *
  * Authors:
  *	Masahide NAKAMURA @USAGI
  */
@@ -57,6 +41,7 @@ static void usage(void)
 		"	[ mark MARK [ mask MASK ] ] [ index INDEX ] [ ptype PTYPE ]\n"
 		"	[ action ACTION ] [ priority PRIORITY ] [ flag FLAG-LIST ]\n"
 		"	[ if_id IF_ID ] [ LIMIT-LIST ] [ TMPL-LIST ]\n"
+		"	[ offload packet dev DEV] } ]\n"
 		"Usage: ip xfrm policy { delete | get } { SELECTOR | index INDEX } dir DIR\n"
 		"	[ ctx CTX ] [ mark MARK [ mask MASK ] ] [ ptype PTYPE ]\n"
 		"	[ if_id IF_ID ]\n"
@@ -66,6 +51,8 @@ static void usage(void)
 		"Usage: ip xfrm policy flush [ ptype PTYPE ]\n"
 		"Usage: ip xfrm policy count\n"
 		"Usage: ip xfrm policy set [ hthresh4 LBITS RBITS ] [ hthresh6 LBITS RBITS ]\n"
+		"Usage: ip xfrm policy setdefault DIR ACTION [ DIR ACTION ] [ DIR ACTION ]\n"
+		"Usage: ip xfrm policy getdefault\n"
 		"SELECTOR := [ src ADDR[/PLEN] ] [ dst ADDR[/PLEN] ] [ dev DEV ] [ UPSPEC ]\n"
 		"UPSPEC := proto { { tcp | udp | sctp | dccp } [ sport PORT ] [ dport PORT ] |\n"
 		"                  { icmp | ipv6-icmp | mobility-header } [ type NUMBER ] [ code NUMBER ] |\n"
@@ -258,6 +245,7 @@ static int xfrm_policy_modify(int cmd, unsigned int flags, int argc, char **argv
 	char *ptypep = NULL;
 	char *sctxp = NULL;
 	struct xfrm_userpolicy_type upt = {};
+	struct xfrm_user_offload xuo = {};
 	char tmpls_buf[XFRM_TMPLS_BUF_SIZE] = {};
 	int tmpls_len = 0;
 	struct xfrm_mark mark = {0, 0};
@@ -266,6 +254,8 @@ static int xfrm_policy_modify(int cmd, unsigned int flags, int argc, char **argv
 		char	str[CTX_BUF_SIZE];
 	} ctx = {};
 	bool is_if_id_set = false;
+	unsigned int ifindex = 0;
+	bool is_offload = false;
 	__u32 if_id = 0;
 
 	while (argc > 0) {
@@ -340,6 +330,21 @@ static int xfrm_policy_modify(int cmd, unsigned int flags, int argc, char **argv
 			if (get_u32(&if_id, *argv, 0))
 				invarg("IF_ID value is invalid", *argv);
 			is_if_id_set = true;
+		} else if (strcmp(*argv, "offload") == 0) {
+			NEXT_ARG();
+			if (strcmp(*argv, "packet") == 0)
+				NEXT_ARG();
+			else
+				invarg("Invalid offload mode", *argv);
+
+			if (strcmp(*argv, "dev") == 0) {
+				NEXT_ARG();
+				ifindex = ll_name_to_index(*argv);
+				if (!ifindex)
+					invarg("Invalid device name", *argv);
+			} else
+				invarg("Missing dev keyword", *argv);
+			is_offload = true;
 		} else {
 			if (selp)
 				duparg("unknown", *argv);
@@ -384,6 +389,13 @@ static int xfrm_policy_modify(int cmd, unsigned int flags, int argc, char **argv
 
 	if (is_if_id_set)
 		addattr32(&req.n, sizeof(req.buf), XFRMA_IF_ID, if_id);
+
+	if (is_offload) {
+		xuo.ifindex = ifindex;
+		xuo.flags |= XFRM_OFFLOAD_PACKET;
+		addattr_l(&req.n, sizeof(req.buf), XFRMA_OFFLOAD_DEV, &xuo,
+			  sizeof(xuo));
+	}
 
 	if (rtnl_open_byproto(&rth, 0, NETLINK_XFRM) < 0)
 		exit(1);
@@ -1124,6 +1136,133 @@ static int xfrm_spd_getinfo(int argc, char **argv)
 	return 0;
 }
 
+static int xfrm_str_to_policy(char *name, uint8_t *policy)
+{
+	if (strcmp(name, "block") == 0) {
+		*policy = XFRM_USERPOLICY_BLOCK;
+		return 0;
+	} else if (strcmp(name, "accept") == 0) {
+		*policy = XFRM_USERPOLICY_ACCEPT;
+		return 0;
+	}
+
+	return -1;
+}
+
+static char *xfrm_policy_to_str(uint8_t policy)
+{
+	switch (policy) {
+	case XFRM_USERPOLICY_UNSPEC:
+		return "unspec";
+	case XFRM_USERPOLICY_BLOCK:
+		return "block";
+	case XFRM_USERPOLICY_ACCEPT:
+		return "accept";
+	default:
+		return "unknown";
+	}
+}
+
+static int xfrm_spd_setdefault(int argc, char **argv)
+{
+	struct rtnl_handle rth;
+	struct {
+		struct nlmsghdr			n;
+		struct xfrm_userpolicy_default  up;
+	} req = {
+		.n.nlmsg_len = NLMSG_LENGTH(sizeof(struct xfrm_userpolicy_default)),
+		.n.nlmsg_flags = NLM_F_REQUEST,
+		.n.nlmsg_type = XFRM_MSG_SETDEFAULT,
+	};
+
+	while (argc > 0) {
+		if (strcmp(*argv, "in") == 0) {
+			if (req.up.in)
+				duparg("in", *argv);
+
+			NEXT_ARG();
+			if (xfrm_str_to_policy(*argv, &req.up.in) < 0)
+				invarg("in policy value is invalid", *argv);
+		} else if (strcmp(*argv, "fwd") == 0) {
+			if (req.up.fwd)
+				duparg("fwd", *argv);
+
+			NEXT_ARG();
+			if (xfrm_str_to_policy(*argv, &req.up.fwd) < 0)
+				invarg("fwd policy value is invalid", *argv);
+		} else if (strcmp(*argv, "out") == 0) {
+			if (req.up.out)
+				duparg("out", *argv);
+
+			NEXT_ARG();
+			if (xfrm_str_to_policy(*argv, &req.up.out) < 0)
+				invarg("out policy value is invalid", *argv);
+		} else {
+			invarg("unknown direction", *argv);
+		}
+
+		argc--; argv++;
+	}
+
+	if (rtnl_open_byproto(&rth, 0, NETLINK_XFRM) < 0)
+		exit(1);
+
+	if (rtnl_talk(&rth, &req.n, NULL) < 0)
+		exit(2);
+
+	rtnl_close(&rth);
+
+	return 0;
+}
+
+int xfrm_policy_default_print(struct nlmsghdr *n, FILE *fp)
+{
+	struct xfrm_userpolicy_default *up = NLMSG_DATA(n);
+	int len = n->nlmsg_len - NLMSG_SPACE(sizeof(*up));
+
+	if (len < 0) {
+		fprintf(stderr,
+			"BUG: short nlmsg len %u (expect %lu) for XFRM_MSG_GETDEFAULT\n",
+			n->nlmsg_len, NLMSG_SPACE(sizeof(*up)));
+		return -1;
+	}
+
+	fprintf(fp, "Default policies:\n");
+	fprintf(fp, " in:  %s\n", xfrm_policy_to_str(up->in));
+	fprintf(fp, " fwd: %s\n", xfrm_policy_to_str(up->fwd));
+	fprintf(fp, " out: %s\n", xfrm_policy_to_str(up->out));
+	fflush(fp);
+
+	return 0;
+}
+
+static int xfrm_spd_getdefault(int argc, char **argv)
+{
+	struct rtnl_handle rth;
+	struct {
+		struct nlmsghdr			n;
+		struct xfrm_userpolicy_default  up;
+	} req = {
+		.n.nlmsg_len = NLMSG_LENGTH(sizeof(struct xfrm_userpolicy_default)),
+		.n.nlmsg_flags = NLM_F_REQUEST,
+		.n.nlmsg_type = XFRM_MSG_GETDEFAULT,
+	};
+	struct nlmsghdr *answer;
+
+	if (rtnl_open_byproto(&rth, 0, NETLINK_XFRM) < 0)
+		exit(1);
+
+	if (rtnl_talk(&rth, &req.n, &answer) < 0)
+		exit(2);
+
+	xfrm_policy_default_print(answer, (FILE *)stdout);
+
+	free(answer);
+	rtnl_close(&rth);
+
+	return 0;
+}
+
 static int xfrm_policy_flush(int argc, char **argv)
 {
 	struct rtnl_handle rth;
@@ -1197,6 +1336,10 @@ int do_xfrm_policy(int argc, char **argv)
 		return xfrm_spd_getinfo(argc, argv);
 	if (matches(*argv, "set") == 0)
 		return xfrm_spd_setinfo(argc-1, argv+1);
+	if (matches(*argv, "setdefault") == 0)
+		return xfrm_spd_setdefault(argc-1, argv+1);
+	if (matches(*argv, "getdefault") == 0)
+		return xfrm_spd_getdefault(argc-1, argv+1);
 	if (matches(*argv, "help") == 0)
 		usage();
 	fprintf(stderr, "Command \"%s\" is unknown, try \"ip xfrm policy help\".\n", *argv);

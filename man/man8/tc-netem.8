@@ -67,7 +67,7 @@ NetEm \- Network Emulator
 
 .SH DESCRIPTION
 NetEm is an enhancement of the Linux traffic control facilities
-that allow to add delay, packet loss, duplication and more other
+that allow one to add delay, packet loss, duplication and more other
 characteristics to packets outgoing from a selected network
 interface. NetEm is built using the existing Quality Of Service (QOS)
 and Differentiated Services (diffserv) facilities in the Linux
@@ -82,12 +82,12 @@ maximum number of packets the qdisc may hold queued at a time.
 
 .SS delay
 adds the chosen delay to the packets outgoing to chosen network interface. The
-optional parameters allows to introduce a delay variation and a correlation.
+optional parameters allows one to introduce a delay variation and a correlation.
 Delay and jitter values are expressed in ms while correlation is percentage.
 
 .SS distribution
 allow the user to choose the delay distribution. If not specified, the default
-distribution is Normal. Additional parameters allow to consider situations in
+distribution is Normal. Additional parameters allow one to consider situations in
 which network has variable delays depending on traffic flows concurring on the
 same path, that causes several delay peaks and a tail.
 
@@ -99,7 +99,7 @@ is now deprecated due to the noticed bad behavior.
 .SS loss state
 adds packet losses according to the 4-state Markov using the transition
 probabilities as input parameters. The parameter p13 is mandatory and if used
-alone corresponds to the Bernoulli model. The optional parameters allows to
+alone corresponds to the Bernoulli model. The optional parameters allows one to
 extend the model to 2-state (p31), 3-state (p23 and p32) and 4-state (p14).
 State 1 corresponds to good reception, State 4 to independent losses, State 3
 to burst losses and State 2 to good reception within a burst.

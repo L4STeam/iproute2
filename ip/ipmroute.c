@@ -1,13 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * ipmroute.c		"ip mroute".
  *
- *		This program is free software; you can redistribute it and/or
- *		modify it under the terms of the GNU General Public License
- *		as published by the Free Software Foundation; either version
- *		2 of the License, or (at your option) any later version.
- *
  * Authors:	Alexey Kuznetsov, <kuznet@ms2.inr.ac.ru>
- *
  */
 
 #include <stdio.h>
@@ -37,11 +32,8 @@ static void usage(void)
 {
 	fprintf(stderr,
 		"Usage: ip mroute show [ [ to ] PREFIX ] [ from PREFIX ] [ iif DEVICE ]\n"
-	"			[ table TABLE_ID ]\n"
-	"TABLE_ID := [ local | main | default | all | NUMBER ]\n"
-#if 0
-	"Usage: ip mroute [ add | del ] DESTINATION from SOURCE [ iif DEVICE ] [ oif DEVICE ]\n"
-#endif
+		"                      [ table TABLE_ID ]\n"
+		"TABLE_ID := [ local | main | default | all | NUMBER ]\n"
 	);
 	exit(-1);
 }
@@ -322,14 +314,7 @@ int do_multiroute(int argc, char **argv)
 {
 	if (argc < 1)
 		return mroute_list(0, NULL);
-#if 0
-	if (matches(*argv, "add") == 0)
-		return mroute_modify(RTM_NEWADDR, argc-1, argv+1);
-	if (matches(*argv, "delete") == 0)
-		return mroute_modify(RTM_DELADDR, argc-1, argv+1);
-	if (matches(*argv, "get") == 0)
-		return mroute_get(argc-1, argv+1);
-#endif
+
 	if (matches(*argv, "list") == 0 || matches(*argv, "show") == 0
 	    || matches(*argv, "lst") == 0)
 		return mroute_list(argc-1, argv+1);

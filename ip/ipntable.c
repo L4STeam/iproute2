@@ -1,23 +1,9 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright (C)2006 USAGI/WIDE Project
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, see <http://www.gnu.org/licenses>.
- */
-/*
  * based on ipneigh.c
- */
-/*
+ *
  * Authors:
  *	Masahide NAKAMURA @USAGI
  */
@@ -47,15 +33,15 @@ static void usage(void)
 {
 	fprintf(stderr,
 		"Usage: ip ntable change name NAME [ dev DEV ]\n"
-		"	 [ thresh1 VAL ] [ thresh2 VAL ] [ thresh3 VAL ] [ gc_int MSEC ]\n"
-		"	 [ PARMS ]\n"
+		"        [ thresh1 VAL ] [ thresh2 VAL ] [ thresh3 VAL ] [ gc_int MSEC ]\n"
+		"        [ PARMS ]\n"
 		"Usage: ip ntable show [ dev DEV ] [ name NAME ]\n"
 
 		"PARMS := [ base_reachable MSEC ] [ retrans MSEC ] [ gc_stale MSEC ]\n"
-		"	 [ delay_probe MSEC ] [ queue LEN ]\n"
-		"	 [ app_probes VAL ] [ ucast_probes VAL ] [ mcast_probes VAL ]\n"
-		"	 [ anycast_delay MSEC ] [ proxy_delay MSEC ] [ proxy_queue LEN ]\n"
-		"	 [ locktime MSEC ]\n"
+		"         [ delay_probe MSEC ] [ queue LEN ]\n"
+		"         [ app_probes VAL ] [ ucast_probes VAL ] [ mcast_probes VAL ]\n"
+		"         [ anycast_delay MSEC ] [ proxy_delay MSEC ] [ proxy_queue LEN ]\n"
+		"         [ locktime MSEC ]\n"
 		);
 
 	exit(-1);

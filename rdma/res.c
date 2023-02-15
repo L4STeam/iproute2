@@ -11,7 +11,7 @@ static int res_help(struct rd *rd)
 {
 	pr_out("Usage: %s resource\n", rd->filename);
 	pr_out("          resource show [DEV]\n");
-	pr_out("          resource show [qp|cm_id|pd|mr|cq]\n");
+	pr_out("          resource show [qp|cm_id|pd|mr|cq|ctx|srq]\n");
 	pr_out("          resource show qp link [DEV/PORT]\n");
 	pr_out("          resource show qp link [DEV/PORT] [FILTER-NAME FILTER-VALUE]\n");
 	pr_out("          resource show cm_id link [DEV/PORT]\n");
@@ -22,6 +22,10 @@ static int res_help(struct rd *rd)
 	pr_out("          resource show pd dev [DEV] [FILTER-NAME FILTER-VALUE]\n");
 	pr_out("          resource show mr dev [DEV]\n");
 	pr_out("          resource show mr dev [DEV] [FILTER-NAME FILTER-VALUE]\n");
+	pr_out("          resource show ctx dev [DEV]\n");
+	pr_out("          resource show ctx dev [DEV] [FILTER-NAME FILTER-VALUE]\n");
+	pr_out("          resource show srq dev [DEV]\n");
+	pr_out("          resource show srq dev [DEV] [FILTER-NAME FILTER-VALUE]\n");
 	return 0;
 }
 
@@ -47,7 +51,7 @@ static int res_print_summary(struct rd *rd, struct nlattr **tb)
 
 		name = mnl_attr_get_str(nla_line[RDMA_NLDEV_ATTR_RES_SUMMARY_ENTRY_NAME]);
 		curr = mnl_attr_get_u64(nla_line[RDMA_NLDEV_ATTR_RES_SUMMARY_ENTRY_CURR]);
-		res_print_uint(
+		res_print_u64(
 			rd, name, curr,
 			nla_line[RDMA_NLDEV_ATTR_RES_SUMMARY_ENTRY_CURR]);
 	}
@@ -142,12 +146,12 @@ const char *qp_types_to_str(uint8_t idx)
 						     "RAW_ETHERTYPE",
 						     "UNKNOWN", "RAW_PACKET",
 						     "XRC_INI", "XRC_TGT",
-						     [0xFF] = "DRIVER",
 	};
 
-	if (idx < ARRAY_SIZE(qp_types_str) && qp_types_str[idx])
+	if (idx < ARRAY_SIZE(qp_types_str))
 		return qp_types_str[idx];
-	return "UNKNOWN";
+
+	return (idx == 0xFF) ? "DRIVER" : "UNKNOWN";
 }
 
 void print_comm(struct rd *rd, const char *str, struct nlattr **nla_line)
@@ -195,30 +199,6 @@ void print_qp_type(struct rd *rd, uint32_t val)
 			   qp_types_to_str(val));
 }
 
-char *get_task_name(uint32_t pid)
-{
-	char *comm;
-	FILE *f;
-
-	if (!pid)
-		return NULL;
-
-	if (asprintf(&comm, "/proc/%d/comm", pid) < 0)
-		return NULL;
-
-	f = fopen(comm, "r");
-	free(comm);
-	if (!f)
-		return NULL;
-
-	if (fscanf(f, "%ms\n", &comm) != 1)
-		comm = NULL;
-
-	fclose(f);
-
-	return comm;
-}
-
 void print_key(struct rd *rd, const char *name, uint64_t val,
 	       struct nlattr *nlattr)
 {
@@ -228,13 +208,22 @@ void print_key(struct rd *rd, const char *name, uint64_t val,
 	print_color_hex(PRINT_ANY, COLOR_NONE, name, " 0x%" PRIx64 " ", val);
 }
 
-void res_print_uint(struct rd *rd, const char *name, uint64_t val,
+void res_print_u32(struct rd *rd, const char *name, uint32_t val,
 		    struct nlattr *nlattr)
 {
 	if (!nlattr)
 		return;
 	print_color_uint(PRINT_ANY, COLOR_NONE, name, name, val);
-	print_color_uint(PRINT_FP, COLOR_NONE, NULL, " %d ", val);
+	print_color_uint(PRINT_FP, COLOR_NONE, NULL, " %" PRIu32 " ", val);
+}
+
+void res_print_u64(struct rd *rd, const char *name, uint64_t val,
+		    struct nlattr *nlattr)
+{
+	if (!nlattr)
+		return;
+	print_color_u64(PRINT_ANY, COLOR_NONE, name, name, val);
+	print_color_u64(PRINT_FP, COLOR_NONE, NULL, " %" PRIu64 " ", val);
 }
 
 RES_FUNC(res_no_args,	RDMA_NLDEV_CMD_RES_GET,	NULL, true, 0);
@@ -248,6 +237,8 @@ static int res_show(struct rd *rd)
 		{ "cq",		res_cq		},
 		{ "mr",		res_mr		},
 		{ "pd",		res_pd		},
+		{ "ctx",	res_ctx		},
+		{ "srq",	res_srq		},
 		{ 0 }
 	};
 

@@ -1,10 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * f_bpf.c	BPF-based Classifier
- *
- *		This program is free software; you can distribute it and/or
- *		modify it under the terms of the GNU General Public License
- *		as published by the Free Software Foundation; either version
- *		2 of the License, or (at your option) any later version.
  *
  * Authors:	Daniel Borkmann <daniel@iogearbox.net>
  */
@@ -126,14 +122,14 @@ opt_bpf:
 			bpf_uds_name = cfg.uds;
 		} else if (matches(*argv, "classid") == 0 ||
 			   matches(*argv, "flowid") == 0) {
-			unsigned int handle;
+			unsigned int classid;
 
 			NEXT_ARG();
-			if (get_tc_classid(&handle, *argv)) {
+			if (get_tc_classid(&classid, *argv)) {
 				fprintf(stderr, "Illegal \"classid\"\n");
 				return -1;
 			}
-			addattr32(n, MAX_MSG, TCA_BPF_CLASSID, handle);
+			addattr32(n, MAX_MSG, TCA_BPF_CLASSID, classid);
 		} else if (matches(*argv, "direct-action") == 0 ||
 			   matches(*argv, "da") == 0) {
 			bpf_flags |= TCA_BPF_FLAG_ACT_DIRECT;

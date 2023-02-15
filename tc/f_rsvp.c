@@ -1,13 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * q_rsvp.c		RSVP filter.
  *
- *		This program is free software; you can redistribute it and/or
- *		modify it under the terms of the GNU General Public License
- *		as published by the Free Software Foundation; either version
- *		2 of the License, or (at your option) any later version.
- *
  * Authors:	Alexey Kuznetsov, <kuznet@ms2.inr.ac.ru>
- *
  */
 
 #include <stdio.h>
@@ -230,14 +225,14 @@ static int rsvp_parse_opt(struct filter_util *qu, char *handle, int argc,
 			pinfo_ok++;
 		} else if (matches(*argv, "classid") == 0 ||
 			   strcmp(*argv, "flowid") == 0) {
-			unsigned int handle;
+			unsigned int classid;
 
 			NEXT_ARG();
-			if (get_tc_classid(&handle, *argv)) {
+			if (get_tc_classid(&classid, *argv)) {
 				fprintf(stderr, "Illegal \"classid\"\n");
 				return -1;
 			}
-			addattr_l(n, 4096, TCA_RSVP_CLASSID, &handle, 4);
+			addattr_l(n, 4096, TCA_RSVP_CLASSID, &classid, 4);
 		} else if (strcmp(*argv, "tunnelid") == 0) {
 			unsigned int tid;
 

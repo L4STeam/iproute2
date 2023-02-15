@@ -1,13 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * link_ip6tnl.c	ip6tnl driver module
  *
- *		This program is free software; you can redistribute it and/or
- *		modify it under the terms of the GNU General Public License
- *		as published by the Free Software Foundation; either version
- *		2 of the License, or (at your option) any later version.
- *
  * Authors:	Nicolas Dichtel <nicolas.dichtel@6wind.com>
- *
  */
 
 #include <string.h>
@@ -344,7 +339,6 @@ static void ip6tunnel_print_opt(struct link_util *lu, FILE *f, struct rtattr *tb
 
 	if (tb[IFLA_IPTUN_COLLECT_METADATA]) {
 		print_bool(PRINT_ANY, "external", "external ", true);
-		return;
 	}
 
 	if (tb[IFLA_IPTUN_FLAGS])

@@ -1,25 +1,9 @@
-/* $USAGI: $ */
-
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright (C)2004 USAGI/WIDE Project
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, see <http://www.gnu.org/licenses>.
- */
-/*
  * based on iproute.c
- */
-/*
+ *
  * Authors:
  *	Masahide NAKAMURA @USAGI
  */
@@ -61,9 +45,9 @@ static void usage(void)
 		"        [ replay-seq-hi SEQ ] [ replay-oseq-hi SEQ ]\n"
 		"        [ flag FLAG-LIST ] [ sel SELECTOR ] [ LIMIT-LIST ] [ encap ENCAP ]\n"
 		"        [ coa ADDR[/PLEN] ] [ ctx CTX ] [ extra-flag EXTRA-FLAG-LIST ]\n"
-		"        [ offload [dev DEV] dir DIR ]\n"
+		"        [ offload [ crypto | packet ] dev DEV dir DIR ]\n"
 		"        [ output-mark OUTPUT-MARK [ mask MASK ] ]\n"
-		"        [ if_id IF_ID ]\n"
+		"        [ if_id IF_ID ] [ tfcpad LENGTH ]\n"
 		"Usage: ip xfrm state allocspi ID [ mode MODE ] [ mark MARK [ mask MASK ] ]\n"
 		"        [ reqid REQID ] [ seq SEQ ] [ min SPI max SPI ]\n"
 		"Usage: ip xfrm state { delete | get } ID [ mark MARK [ mask MASK ] ]\n"
@@ -123,11 +107,6 @@ static int xfrm_algo_parse(struct xfrm_algo *alg, enum xfrm_attr_type_t type,
 {
 	int len;
 	int slen = strlen(key);
-
-#if 0
-	/* XXX: verifying both name and key is required! */
-	fprintf(stderr, "warning: ALGO-NAME/ALGO-KEYMAT values will be sent to the kernel promiscuously! (verifying them isn't implemented yet)\n");
-#endif
 
 	strlcpy(alg->alg_name, name, sizeof(alg->alg_name));
 
@@ -272,7 +251,7 @@ static int xfrm_state_extra_flag_parse(__u32 *extra_flags, int *argcp, char ***a
 	return 0;
 }
 
-static int xfrm_offload_dir_parse(__u8 *dir, int *argcp, char ***argvp)
+static bool xfrm_offload_dir_parse(__u8 *dir, int *argcp, char ***argvp)
 {
 	int argc = *argcp;
 	char **argv = *argvp;
@@ -282,12 +261,12 @@ static int xfrm_offload_dir_parse(__u8 *dir, int *argcp, char ***argvp)
 	else if (strcmp(*argv, "out") == 0)
 		*dir = 0;
 	else
-		invarg("DIR value is invalid", *argv);
+		return false;
 
 	*argcp = argc;
 	*argvp = argv;
 
-	return 0;
+	return true;
 }
 
 static int xfrm_state_modify(int cmd, unsigned int flags, int argc, char **argv)
@@ -312,7 +291,7 @@ static int xfrm_state_modify(int cmd, unsigned int flags, int argc, char **argv)
 	struct xfrm_user_offload xuo = {};
 	unsigned int ifindex = 0;
 	__u8 dir = 0;
-	bool is_offload = false;
+	bool is_offload = false, is_packet_offload = false;
 	__u32 replay_window = 0;
 	__u32 seq = 0, oseq = 0, seq_hi = 0, oseq_hi = 0;
 	char *idp = NULL;
@@ -331,6 +310,7 @@ static int xfrm_state_modify(int cmd, unsigned int flags, int argc, char **argv)
 	struct xfrm_mark output_mark = {0, 0};
 	bool is_if_id_set = false;
 	__u32 if_id = 0;
+	__u32 tfcpad = 0;
 
 	while (argc > 0) {
 		if (strcmp(*argv, "mode") == 0) {
@@ -428,24 +408,37 @@ static int xfrm_state_modify(int cmd, unsigned int flags, int argc, char **argv)
 			addattr_l(&req.n, sizeof(req.buf), XFRMA_SEC_CTX,
 				  (void *)&ctx, ctx.sctx.len);
 		} else if (strcmp(*argv, "offload") == 0) {
-			is_offload = true;
 			NEXT_ARG();
+			/* If user doesn't provide offload mode, treat it as
+			 * crypto one for the backward compatibility.
+			 */
+			if (strcmp(*argv, "crypto") == 0)
+				NEXT_ARG();
+			else if (strcmp(*argv, "packet") == 0) {
+				is_packet_offload = true;
+				NEXT_ARG();
+			}
+
 			if (strcmp(*argv, "dev") == 0) {
 				NEXT_ARG();
 				ifindex = ll_name_to_index(*argv);
-				if (!ifindex) {
-					invarg("value after \"offload dev\" is invalid", *argv);
-					is_offload = false;
-				}
-				NEXT_ARG();
-			}
+				if (!ifindex)
+					invarg("Invalid device name", *argv);
+			} else
+				invarg("Missing dev keyword", *argv);
+
+			NEXT_ARG();
 			if (strcmp(*argv, "dir") == 0) {
+				bool is_dir;
+
 				NEXT_ARG();
-				xfrm_offload_dir_parse(&dir, &argc, &argv);
-			} else {
-				invarg("value after \"offload dir\" is invalid", *argv);
-				is_offload = false;
-			}
+				is_dir = xfrm_offload_dir_parse(&dir, &argc,
+								&argv);
+				if (!is_dir)
+					invarg("DIR value is invalid", *argv);
+			} else
+				invarg("Missing DIR keyword", *argv);
+			is_offload = true;
 		} else if (strcmp(*argv, "output-mark") == 0) {
 			NEXT_ARG();
 			if (get_u32(&output_mark.v, *argv, 0))
@@ -465,6 +458,10 @@ static int xfrm_state_modify(int cmd, unsigned int flags, int argc, char **argv)
 			if (get_u32(&if_id, *argv, 0))
 				invarg("value after \"if_id\" is invalid", *argv);
 			is_if_id_set = true;
+		} else if (strcmp(*argv, "tfcpad") == 0) {
+			NEXT_ARG();
+			if (get_u32(&tfcpad, *argv, 0))
+				invarg("value after \"tfcpad\" is invalid", *argv);
 		} else {
 			/* try to assume ALGO */
 			int type = xfrm_algotype_getbyname(*argv);
@@ -605,6 +602,8 @@ static int xfrm_state_modify(int cmd, unsigned int flags, int argc, char **argv)
 	if (is_offload) {
 		xuo.ifindex = ifindex;
 		xuo.flags = dir;
+		if (is_packet_offload)
+			xuo.flags |= XFRM_OFFLOAD_PACKET;
 		addattr_l(&req.n, sizeof(req.buf), XFRMA_OFFLOAD_DEV, &xuo,
 			  sizeof(xuo));
 	}
@@ -649,6 +648,9 @@ static int xfrm_state_modify(int cmd, unsigned int flags, int argc, char **argv)
 
 	if (is_if_id_set)
 		addattr32(&req.n, sizeof(req.buf), XFRMA_IF_ID, if_id);
+
+	if (tfcpad)
+		addattr32(&req.n, sizeof(req.buf), XFRMA_TFCPAD, tfcpad);
 
 	if (xfrm_xfrmproto_is_ipsec(req.xsinfo.id.proto)) {
 		switch (req.xsinfo.mode) {
@@ -783,12 +785,6 @@ static int xfrm_state_allocspi(int argc, char **argv)
 		.n.nlmsg_flags = NLM_F_REQUEST,
 		.n.nlmsg_type = XFRM_MSG_ALLOCSPI,
 		.xspi.info.family = preferred_family,
-#if 0
-		.xspi.lft.soft_byte_limit = XFRM_INF,
-		.xspi.lft.hard_byte_limit = XFRM_INF,
-		.xspi.lft.soft_packet_limit = XFRM_INF,
-		.xspi.lft.hard_packet_limit = XFRM_INF,
-#endif
 	};
 	char *idp = NULL;
 	char *minp = NULL;

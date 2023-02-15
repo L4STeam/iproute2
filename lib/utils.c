@@ -1,13 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * utils.c
  *
- *		This program is free software; you can redistribute it and/or
- *		modify it under the terms of the GNU General Public License
- *		as published by the Free Software Foundation; either version
- *		2 of the License, or (at your option) any later version.
- *
  * Authors:	Alexey Kuznetsov, <kuznet@ms2.inr.ac.ru>
- *
  */
 
 #include <stdio.h>
@@ -540,7 +535,7 @@ static int __get_addr_1(inet_prefix *addr, const char *name, int family)
 	memset(addr, 0, sizeof(*addr));
 
 	if (strcmp(name, "default") == 0) {
-		if ((family == AF_DECnet) || (family == AF_MPLS))
+		if (family == AF_MPLS)
 			return -1;
 		addr->family = family;
 		addr->bytelen = af_byte_len(addr->family);
@@ -551,7 +546,7 @@ static int __get_addr_1(inet_prefix *addr, const char *name, int family)
 
 	if (strcmp(name, "all") == 0 ||
 	    strcmp(name, "any") == 0) {
-		if ((family == AF_DECnet) || (family == AF_MPLS))
+		if (family == AF_MPLS)
 			return -1;
 		addr->family = family;
 		addr->bytelen = 0;
@@ -636,10 +631,6 @@ int af_bit_len(int af)
 		return 128;
 	case AF_INET:
 		return 32;
-	case AF_DECnet:
-		return 16;
-	case AF_IPX:
-		return 80;
 	case AF_MPLS:
 		return 20;
 	}
@@ -728,16 +719,6 @@ int get_addr_rta(inet_prefix *dst, const struct rtattr *rta, int family)
 		dst->family = AF_INET6;
 		dst->bytelen = 16;
 		memcpy(dst->data, data, 16);
-		break;
-	case 2:
-		dst->family = AF_DECnet;
-		dst->bytelen = 2;
-		memcpy(dst->data, data, 2);
-		break;
-	case 10:
-		dst->family = AF_IPX;
-		dst->bytelen = 10;
-		memcpy(dst->data, data, 10);
 		break;
 	default:
 		return -1;
@@ -1029,8 +1010,6 @@ int read_family(const char *name)
 		family = AF_INET6;
 	else if (strcmp(name, "link") == 0)
 		family = AF_PACKET;
-	else if (strcmp(name, "ipx") == 0)
-		family = AF_IPX;
 	else if (strcmp(name, "mpls") == 0)
 		family = AF_MPLS;
 	else if (strcmp(name, "bridge") == 0)
@@ -1046,8 +1025,6 @@ const char *family_name(int family)
 		return "inet6";
 	if (family == AF_PACKET)
 		return "link";
-	if (family == AF_IPX)
-		return "ipx";
 	if (family == AF_MPLS)
 		return "mpls";
 	if (family == AF_BRIDGE)
@@ -1714,10 +1691,10 @@ int do_batch(const char *name, bool force,
 
 	cmdlineno = 0;
 	while (getcmdline(&line, &len, stdin) != -1) {
-		char *largv[100];
+		char *largv[MAX_ARGS];
 		int largc;
 
-		largc = makeargs(line, largv, 100);
+		largc = makeargs(line, largv, MAX_ARGS);
 		if (!largc)
 			continue;	/* blank line */
 
@@ -1942,4 +1919,38 @@ void print_indent(struct indent_mem *mem)
 {
 	if (mem->indent_level)
 		printf("%s", mem->indent_str);
+}
+
+const char *proto_n2a(unsigned short id, char *buf, int len,
+		      const struct proto *proto_tb, size_t tb_len)
+{
+	int i;
+
+	id = ntohs(id);
+
+	for (i = 0; !numeric && i < tb_len; i++) {
+		if (proto_tb[i].id == id)
+			return proto_tb[i].name;
+	}
+
+	snprintf(buf, len, "[%d]", id);
+
+	return buf;
+}
+
+int proto_a2n(unsigned short *id, const char *buf,
+	      const struct proto *proto_tb, size_t tb_len)
+{
+	int i;
+
+	for (i = 0; i < tb_len; i++) {
+		if (strcasecmp(proto_tb[i].name, buf) == 0) {
+			*id = htons(proto_tb[i].id);
+			return 0;
+		}
+	}
+	if (get_be16(id, buf, 0))
+		return -1;
+
+	return 0;
 }

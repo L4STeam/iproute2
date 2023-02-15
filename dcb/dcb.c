@@ -72,7 +72,7 @@ static int dcb_get_attribute_attr_ieee_cb(const struct nlattr *attr, void *data)
 
 	ga->payload = mnl_attr_get_payload(attr);
 	ga->payload_len = mnl_attr_get_payload_len(attr);
-	return MNL_CB_STOP;
+	return MNL_CB_OK;
 }
 
 static int dcb_get_attribute_attr_cb(const struct nlattr *attr, void *data)
@@ -106,7 +106,7 @@ static int dcb_set_attribute_attr_cb(const struct nlattr *attr, void *data)
 {
 	struct dcb_set_attribute_response *resp = data;
 	uint16_t len;
-	uint8_t err;
+	int8_t err;
 
 	if (mnl_attr_get_type(attr) != resp->response_attr)
 		return MNL_CB_OK;
@@ -117,14 +117,16 @@ static int dcb_set_attribute_attr_cb(const struct nlattr *attr, void *data)
 		return MNL_CB_ERROR;
 	}
 
+	/* The attribute is formally u8, but actually an i8 containing a
+	 * negative errno value.
+	 */
 	err = mnl_attr_get_u8(attr);
 	if (err) {
-		fprintf(stderr, "Error when attempting to set attribute: %s\n",
-			strerror(err));
+		errno = -err;
 		return MNL_CB_ERROR;
 	}
 
-	return MNL_CB_STOP;
+	return MNL_CB_OK;
 }
 
 static int dcb_set_attribute_cb(const struct nlmsghdr *nlh, void *data)
@@ -154,7 +156,8 @@ static struct nlmsghdr *dcb_prepare(struct dcb *dcb, const char *dev,
 	};
 	struct nlmsghdr *nlh;
 
-	nlh = mnlu_msg_prepare(dcb->buf, nlmsg_type, NLM_F_REQUEST, &dcbm, sizeof(dcbm));
+	nlh = mnlu_msg_prepare(dcb->buf, nlmsg_type, NLM_F_REQUEST | NLM_F_ACK,
+			       &dcbm, sizeof(dcbm));
 	mnl_attr_put_strz(nlh, DCB_ATTR_IFNAME, dev);
 	return nlh;
 }
@@ -242,9 +245,11 @@ static int __dcb_set_attribute(struct dcb *dcb, int command, const char *dev,
 	if (ret)
 		return ret;
 
+	errno = 0;
 	ret = dcb_talk(dcb, nlh, dcb_set_attribute_cb, &resp);
 	if (ret) {
-		perror("Attribute write");
+		if (errno)
+			perror("Attribute write");
 		return ret;
 	}
 	return 0;
@@ -326,51 +331,51 @@ int dcb_set_attribute_bare(struct dcb *dcb, int command, const char *dev,
 
 void dcb_print_array_u8(const __u8 *array, size_t size)
 {
-	SPRINT_BUF(b);
 	size_t i;
 
 	for (i = 0; i < size; i++) {
-		snprintf(b, sizeof(b), "%zd:%%d ", i);
-		print_uint(PRINT_ANY, NULL, b, array[i]);
+		print_uint(PRINT_JSON, NULL, NULL, array[i]);
+		print_uint(PRINT_FP, NULL, "%zd:", i);
+		print_uint(PRINT_FP, NULL, "%d ", array[i]);
 	}
 }
 
 void dcb_print_array_u64(const __u64 *array, size_t size)
 {
-	SPRINT_BUF(b);
 	size_t i;
 
 	for (i = 0; i < size; i++) {
-		snprintf(b, sizeof(b), "%zd:%%" PRIu64 " ", i);
-		print_u64(PRINT_ANY, NULL, b, array[i]);
+		print_u64(PRINT_JSON, NULL, NULL, array[i]);
+		print_uint(PRINT_FP, NULL, "%zd:", i);
+		print_u64(PRINT_FP, NULL, "%" PRIu64 " ", array[i]);
 	}
 }
 
 void dcb_print_array_on_off(const __u8 *array, size_t size)
 {
-	SPRINT_BUF(b);
 	size_t i;
 
 	for (i = 0; i < size; i++) {
-		snprintf(b, sizeof(b), "%zd:%%s ", i);
-		print_on_off(PRINT_ANY, NULL, b, array[i]);
+		print_on_off(PRINT_JSON, NULL, NULL, array[i]);
+		print_uint(PRINT_FP, NULL, "%zd:", i);
+		print_on_off(PRINT_FP, NULL, "%s ", array[i]);
 	}
 }
 
 void dcb_print_array_kw(const __u8 *array, size_t array_size,
 			const char *const kw[], size_t kw_size)
 {
-	SPRINT_BUF(b);
 	size_t i;
 
 	for (i = 0; i < array_size; i++) {
+		const char *str = "???";
 		__u8 emt = array[i];
 
-		snprintf(b, sizeof(b), "%zd:%%s ", i);
 		if (emt < kw_size && kw[emt])
-			print_string(PRINT_ANY, NULL, b, kw[emt]);
-		else
-			print_string(PRINT_ANY, NULL, b, "???");
+			str = kw[emt];
+		print_string(PRINT_JSON, NULL, NULL, str);
+		print_uint(PRINT_FP, NULL, "%zd:", i);
+		print_string(PRINT_FP, NULL, "%s ", str);
 	}
 }
 
@@ -465,7 +470,7 @@ static void dcb_help(void)
 	fprintf(stderr,
 		"Usage: dcb [ OPTIONS ] OBJECT { COMMAND | help }\n"
 		"       dcb [ -f | --force ] { -b | --batch } filename [ -n | --netns ] netnsname\n"
-		"where  OBJECT := { app | buffer | dcbx | ets | maxrate | pfc }\n"
+		"where  OBJECT := { app | apptrust | buffer | dcbx | ets | maxrate | pfc }\n"
 		"       OPTIONS := [ -V | --Version | -i | --iec | -j | --json\n"
 		"                  | -N | --Numeric | -p | --pretty\n"
 		"                  | -s | --statistics | -v | --verbose]\n");
@@ -478,6 +483,8 @@ static int dcb_cmd(struct dcb *dcb, int argc, char **argv)
 		return 0;
 	} else if (matches(*argv, "app") == 0) {
 		return dcb_cmd_app(dcb, argc - 1, argv + 1);
+	} else if (strcmp(*argv, "apptrust") == 0) {
+		return dcb_cmd_apptrust(dcb, argc - 1, argv + 1);
 	} else if (matches(*argv, "buffer") == 0) {
 		return dcb_cmd_buffer(dcb, argc - 1, argv + 1);
 	} else if (matches(*argv, "dcbx") == 0) {
@@ -571,7 +578,8 @@ int main(int argc, char **argv)
 			break;
 		case 'h':
 			dcb_help();
-			return 0;
+			ret = EXIT_SUCCESS;
+			goto dcb_free;
 		default:
 			fprintf(stderr, "Unknown option.\n");
 			dcb_help();

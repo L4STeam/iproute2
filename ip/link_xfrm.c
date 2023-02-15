@@ -18,8 +18,9 @@ static void xfrm_print_help(struct link_util *lu, int argc, char **argv,
 {
 	fprintf(f,
 		"Usage: ... %-4s dev [ PHYS_DEV ] [ if_id IF-ID ]\n"
+		"		[ external ]\n"
 		"\n"
-		"Where: IF-ID := { 0x0..0xffffffff }\n",
+		"Where: IF-ID := { 0x1..0xffffffff }\n",
 		lu->id);
 }
 
@@ -27,6 +28,7 @@ static int xfrm_parse_opt(struct link_util *lu, int argc, char **argv,
 			  struct nlmsghdr *n)
 {
 	unsigned int link = 0;
+	bool metadata = false;
 	__u32 if_id = 0;
 
 	while (argc > 0) {
@@ -39,14 +41,30 @@ static int xfrm_parse_opt(struct link_util *lu, int argc, char **argv,
 			NEXT_ARG();
 			if (get_u32(&if_id, *argv, 0))
 				invarg("if_id value is invalid", *argv);
+			else if (!if_id)
+				invarg("if_id value is invalid", *argv);
 			else
 				addattr32(n, 1024, IFLA_XFRM_IF_ID, if_id);
+		} else if (!strcmp(*argv, "external")) {
+			metadata = true;
 		} else {
 			xfrm_print_help(lu, argc, argv, stderr);
 			return -1;
 		}
 		argc--; argv++;
 	}
+
+	if (metadata) {
+		if (if_id || link) {
+			fprintf(stderr, "xfrmi: both 'external' and if_id/link cannot be specified\n");
+			return -1;
+		}
+		addattr(n, 1024, IFLA_XFRM_COLLECT_METADATA);
+		return 0;
+	}
+
+	if (!if_id)
+		missarg("IF_ID");
 
 	if (link)
 		addattr32(n, 1024, IFLA_XFRM_LINK, link);
@@ -59,6 +77,11 @@ static void xfrm_print_opt(struct link_util *lu, FILE *f, struct rtattr *tb[])
 
 	if (!tb)
 		return;
+
+	if (tb[IFLA_XFRM_COLLECT_METADATA]) {
+		print_bool(PRINT_ANY, "external", "external ", true);
+		return;
+	}
 
 	if (tb[IFLA_XFRM_IF_ID]) {
 		__u32 id = rta_getattr_u32(tb[IFLA_XFRM_IF_ID]);

@@ -1,22 +1,7 @@
-/* $USAGI: $ */
-
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright (C)2004 USAGI/WIDE Project
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, see <http://www.gnu.org/licenses>.
- */
-/*
  * Authors:
  *	Masahide NAKAMURA @USAGI
  */
@@ -124,14 +109,15 @@ const char *strxf_proto(__u8 proto);
 const char *strxf_ptype(__u8 ptype);
 void xfrm_selector_print(struct xfrm_selector *sel, __u16 family,
 			 FILE *fp, const char *prefix);
-void xfrm_xfrma_print(struct rtattr *tb[], __u16 family,
-		      FILE *fp, const char *prefix, bool nokeys);
+void xfrm_xfrma_print(struct rtattr *tb[], __u16 family, FILE *fp,
+		      const char *prefix, bool nokeys, bool dir);
 void xfrm_state_info_print(struct xfrm_usersa_info *xsinfo,
 			    struct rtattr *tb[], FILE *fp, const char *prefix,
 			   const char *title, bool nokeys);
 void xfrm_policy_info_print(struct xfrm_userpolicy_info *xpinfo,
 			    struct rtattr *tb[], FILE *fp, const char *prefix,
 			    const char *title);
+int xfrm_policy_default_print(struct nlmsghdr *n, FILE *fp);
 int xfrm_id_parse(xfrm_address_t *saddr, struct xfrm_id *id, __u16 *family,
 		  int loose, int *argcp, char ***argvp);
 int xfrm_mode_parse(__u8 *mode, int *argcp, char ***argvp);

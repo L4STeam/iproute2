@@ -1,10 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * q_u32.c		U32 filter.
- *
- *		This program is free software; you can u32istribute it and/or
- *		modify it under the terms of the GNU General Public License
- *		as published by the Free Software Foundation; either version
- *		2 of the License, or (at your option) any later version.
  *
  * Authors:	Alexey Kuznetsov, <kuznet@ms2.inr.ac.ru>
  *		Match mark added by Catalin(ux aka Dino) BOIE <catab at umbrella.ro> [5 nov 2004]
@@ -109,7 +105,7 @@ static char *sprint_u32_handle(__u32 handle, char *buf)
 		}
 	}
 	if (show_raw)
-		snprintf(b, bsize, "[%08x] ", handle);
+		snprintf(b, bsize, "[%08x]", handle);
 	return buf;
 }
 
@@ -824,23 +820,27 @@ static void print_ipv4(FILE *f, const struct tc_u32_key *key)
 {
 	char abuf[256];
 
+	open_json_object("match");
 	switch (key->off) {
 	case 0:
 		switch (ntohl(key->mask)) {
 		case 0x0f000000:
-			fprintf(f, "\n  match IP ihl %u",
-				ntohl(key->val) >> 24);
+			print_nl();
+			print_uint(PRINT_ANY, "ip_ihl", "  match IP ihl %u",
+				   ntohl(key->val) >> 24);
 			return;
 		case 0x00ff0000:
-			fprintf(f, "\n  match IP dsfield %#x",
-				ntohl(key->val) >> 16);
+			print_nl();
+			print_0xhex(PRINT_ANY, "ip_dsfield", "  match IP dsfield %#x",
+				    ntohl(key->val) >> 16);
 			return;
 		}
 		break;
 	case 8:
 		if (ntohl(key->mask) == 0x00ff0000) {
-			fprintf(f, "\n  match IP protocol %d",
-				ntohl(key->val) >> 16);
+			print_nl();
+			print_int(PRINT_ANY, "ip_protocol", "  match IP protocol %d",
+				  ntohl(key->val) >> 16);
 			return;
 		}
 		break;
@@ -849,11 +849,21 @@ static void print_ipv4(FILE *f, const struct tc_u32_key *key)
 			int bits = mask2bits(key->mask);
 
 			if (bits >= 0) {
-				fprintf(f, "\n  %s %s/%d",
-					key->off == 12 ? "match IP src" : "match IP dst",
-					inet_ntop(AF_INET, &key->val,
-						  abuf, sizeof(abuf)),
-					bits);
+				const char *addr;
+
+				if (key->off == 12) {
+					print_nl();
+					print_null(PRINT_FP, NULL, "  match IP src ", NULL);
+					open_json_object("src");
+				} else {
+					print_nl();
+					print_null(PRINT_FP, NULL, "  match IP dst ", NULL);
+					open_json_object("dst");
+				}
+				addr = inet_ntop(AF_INET, &key->val, abuf, sizeof(abuf));
+				print_string(PRINT_ANY, "address", "%s", addr);
+				print_int(PRINT_ANY, "prefixlen", "/%d", bits);
+				close_json_object();
 				return;
 			}
 		}
@@ -862,45 +872,52 @@ static void print_ipv4(FILE *f, const struct tc_u32_key *key)
 	case 20:
 		switch (ntohl(key->mask)) {
 		case 0x0000ffff:
-			fprintf(f, "\n  match dport %u",
-				ntohl(key->val) & 0xffff);
+			print_uint(PRINT_ANY, "dport", "match dport %u",
+				   ntohl(key->val) & 0xffff);
 			return;
 		case 0xffff0000:
-			fprintf(f, "\n  match sport %u",
-				ntohl(key->val) >> 16);
+			print_nl();
+			print_uint(PRINT_ANY, "sport", "  match sport %u",
+				   ntohl(key->val) >> 16);
 			return;
 		case 0xffffffff:
-			fprintf(f, "\n  match dport %u, match sport %u",
-				ntohl(key->val) & 0xffff,
-				ntohl(key->val) >> 16);
-
+			print_nl();
+			print_uint(PRINT_ANY, "dport", "  match dport %u, ",
+				   ntohl(key->val) & 0xffff);
+			print_uint(PRINT_ANY, "sport", "match sport %u",
+				   ntohl(key->val) >> 16);
 			return;
 		}
 		/* XXX: Default print_raw */
 	}
+	close_json_object();
 }
 
 static void print_ipv6(FILE *f, const struct tc_u32_key *key)
 {
 	char abuf[256];
 
+	open_json_object("match");
 	switch (key->off) {
 	case 0:
 		switch (ntohl(key->mask)) {
 		case 0x0f000000:
-			fprintf(f, "\n  match IP ihl %u",
-				ntohl(key->val) >> 24);
+			print_nl();
+			print_uint(PRINT_ANY, "ip_ihl", "  match IP ihl %u",
+				   ntohl(key->val) >> 24);
 			return;
 		case 0x00ff0000:
-			fprintf(f, "\n  match IP dsfield %#x",
-				ntohl(key->val) >> 16);
+			print_nl();
+			print_0xhex(PRINT_ANY, "ip_dsfield", "  match IP dsfield %#x",
+				    ntohl(key->val) >> 16);
 			return;
 		}
 		break;
 	case 8:
 		if (ntohl(key->mask) == 0x00ff0000) {
-			fprintf(f, "\n  match IP protocol %d",
-				ntohl(key->val) >> 16);
+			print_nl();
+			print_int(PRINT_ANY, "ip_protocol", "  match IP protocol %d",
+				  ntohl(key->val) >> 16);
 			return;
 		}
 		break;
@@ -909,11 +926,21 @@ static void print_ipv6(FILE *f, const struct tc_u32_key *key)
 			int bits = mask2bits(key->mask);
 
 			if (bits >= 0) {
-				fprintf(f, "\n  %s %s/%d",
-					key->off == 12 ? "match IP src" : "match IP dst",
-					inet_ntop(AF_INET, &key->val,
-						  abuf, sizeof(abuf)),
-					bits);
+				const char *addr;
+
+				if (key->off == 12) {
+					print_nl();
+					print_null(PRINT_FP, NULL, "  match IP src ", NULL);
+					open_json_object("src");
+				} else {
+					print_nl();
+					print_null(PRINT_FP, NULL, "  match IP dst ", NULL);
+					open_json_object("dst");
+				}
+				addr = inet_ntop(AF_INET, &key->val, abuf, sizeof(abuf));
+				print_string(PRINT_ANY, "address", "%s", addr);
+				print_int(PRINT_ANY, "prefixlen", "/%d", bits);
+				close_json_object();
 				return;
 			}
 		}
@@ -922,31 +949,37 @@ static void print_ipv6(FILE *f, const struct tc_u32_key *key)
 	case 20:
 		switch (ntohl(key->mask)) {
 		case 0x0000ffff:
-			fprintf(f, "\n  match sport %u",
-				ntohl(key->val) & 0xffff);
+			print_nl();
+			print_uint(PRINT_ANY, "sport", "  match sport %u",
+				   ntohl(key->val) & 0xffff);
 			return;
 		case 0xffff0000:
-			fprintf(f, "\n  match dport %u",
-				ntohl(key->val) >> 16);
+			print_uint(PRINT_ANY, "dport", "match dport %u",
+				   ntohl(key->val) >> 16);
 			return;
 		case 0xffffffff:
-			fprintf(f, "\n  match sport %u, match dport %u",
-				ntohl(key->val) & 0xffff,
-				ntohl(key->val) >> 16);
+			print_nl();
+			print_uint(PRINT_ANY, "sport", "  match sport %u, ",
+				   ntohl(key->val) & 0xffff);
+			print_uint(PRINT_ANY, "dport", "match dport %u",
+				   ntohl(key->val) >> 16);
 
 			return;
 		}
 		/* XXX: Default print_raw */
 	}
+	close_json_object();
 }
 
 static void print_raw(FILE *f, const struct tc_u32_key *key)
 {
-	fprintf(f, "\n  match %08x/%08x at %s%d",
-		(unsigned int)ntohl(key->val),
-		(unsigned int)ntohl(key->mask),
-		key->offmask ? "nexthdr+" : "",
-		key->off);
+	open_json_object("match");
+	print_nl();
+	print_hex(PRINT_ANY, "value", "  match %08x", (unsigned int)ntohl(key->val));
+	print_hex(PRINT_ANY, "mask", "/%08x ", (unsigned int)ntohl(key->mask));
+	print_string(PRINT_ANY, "offmask", "at %s", key->offmask ? "nexthdr+" : "");
+	print_int(PRINT_ANY, "off", "%d", key->off);
+	close_json_object();
 }
 
 static const struct {
@@ -976,6 +1009,13 @@ show_k:
 
 	i = 0;
 	goto show_k;
+}
+
+static __u32 u32_hash_fold(struct tc_u32_key *key)
+{
+	__u8 fshift = key->mask ? ffs(ntohl(key->mask)) - 1 : 0;
+
+	return ntohl(key->val & key->mask) >> fshift;
 }
 
 static int u32_parse_opt(struct filter_util *qu, char *handle,
@@ -1110,9 +1150,7 @@ static int u32_parse_opt(struct filter_util *qu, char *handle,
 				}
 				NEXT_ARG();
 			}
-			hash = sel2.keys[0].val & sel2.keys[0].mask;
-			hash ^= hash >> 16;
-			hash ^= hash >> 8;
+			hash = u32_hash_fold(&sel2.keys[0]);
 			htid = ((hash % divisor) << 12) | (htid & 0xFFF00000);
 			sample_ok = 1;
 			continue;
@@ -1208,11 +1246,11 @@ static int u32_print_opt(struct filter_util *qu, FILE *f, struct rtattr *opt,
 
 	if (handle) {
 		SPRINT_BUF(b1);
-		fprintf(f, "fh %s ", sprint_u32_handle(handle, b1));
+		print_string(PRINT_ANY, "fh", "fh %s ", sprint_u32_handle(handle, b1));
 	}
 
 	if (TC_U32_NODE(handle))
-		fprintf(f, "order %d ", TC_U32_NODE(handle));
+		print_int(PRINT_ANY, "order", "order %d ", TC_U32_NODE(handle));
 
 	if (tb[TCA_U32_SEL]) {
 		if (RTA_PAYLOAD(tb[TCA_U32_SEL])  < sizeof(*sel))
@@ -1222,44 +1260,46 @@ static int u32_print_opt(struct filter_util *qu, FILE *f, struct rtattr *opt,
 	}
 
 	if (tb[TCA_U32_DIVISOR]) {
-		fprintf(f, "ht divisor %d ",
-			rta_getattr_u32(tb[TCA_U32_DIVISOR]));
+		__u32 htdivisor = rta_getattr_u32(tb[TCA_U32_DIVISOR]);
+
+		print_int(PRINT_ANY, "ht_divisor", "ht divisor %d ", htdivisor);
 	} else if (tb[TCA_U32_HASH]) {
 		__u32 htid = rta_getattr_u32(tb[TCA_U32_HASH]);
-
-		fprintf(f, "key ht %x bkt %x ", TC_U32_USERHTID(htid),
-			TC_U32_HASH(htid));
+		print_hex(PRINT_ANY, "key_ht", "key ht %x ", TC_U32_USERHTID(htid));
+		print_hex(PRINT_ANY, "bkt", "bkt %x ", TC_U32_HASH(htid));
 	} else {
-		fprintf(f, "??? ");
+		fprintf(stderr, "divisor and hash missing ");
 	}
 	if (tb[TCA_U32_CLASSID]) {
+		__u32 classid = rta_getattr_u32(tb[TCA_U32_CLASSID]);
 		SPRINT_BUF(b1);
-		fprintf(f, "%sflowid %s ",
-			!sel || !(sel->flags & TC_U32_TERMINAL) ? "*" : "",
-			sprint_tc_classid(rta_getattr_u32(tb[TCA_U32_CLASSID]),
-					  b1));
-	} else if (sel && sel->flags & TC_U32_TERMINAL) {
-		fprintf(f, "terminal flowid ??? ");
+		if (sel && (sel->flags & TC_U32_TERMINAL))
+			print_string(PRINT_FP, NULL, "*", NULL);
+
+		print_string(PRINT_ANY, "flowid", "flowid %s ",
+			     sprint_tc_classid(classid, b1));
+	} else if (sel && (sel->flags & TC_U32_TERMINAL)) {
+		print_string(PRINT_FP, NULL, "terminal flowid ", NULL);
 	}
 	if (tb[TCA_U32_LINK]) {
 		SPRINT_BUF(b1);
-		fprintf(f, "link %s ",
-			sprint_u32_handle(rta_getattr_u32(tb[TCA_U32_LINK]),
-					  b1));
+		char *link = sprint_u32_handle(rta_getattr_u32(tb[TCA_U32_LINK]), b1);
+
+		print_string(PRINT_ANY, "link", "link %s ", link);
 	}
 
 	if (tb[TCA_U32_FLAGS]) {
 		__u32 flags = rta_getattr_u32(tb[TCA_U32_FLAGS]);
 
 		if (flags & TCA_CLS_FLAGS_SKIP_HW)
-			fprintf(f, "skip_hw ");
+			print_bool(PRINT_ANY, "skip_hw", "skip_hw ", true);
 		if (flags & TCA_CLS_FLAGS_SKIP_SW)
-			fprintf(f, "skip_sw ");
+			print_bool(PRINT_ANY, "skip_sw", "skip_sw ", true);
 
 		if (flags & TCA_CLS_FLAGS_IN_HW)
-			fprintf(f, "in_hw ");
+			print_bool(PRINT_ANY, "in_hw", "in_hw ", true);
 		else if (flags & TCA_CLS_FLAGS_NOT_IN_HW)
-			fprintf(f, "not_in_hw ");
+			print_bool(PRINT_ANY, "not_in_hw", "not_in_hw ", true);
 	}
 
 	if (tb[TCA_U32_PCNT]) {
@@ -1270,10 +1310,10 @@ static int u32_print_opt(struct filter_util *qu, FILE *f, struct rtattr *opt,
 		pf = RTA_DATA(tb[TCA_U32_PCNT]);
 	}
 
-	if (sel && show_stats && NULL != pf)
-		fprintf(f, " (rule hit %llu success %llu)",
-			(unsigned long long) pf->rcnt,
-			(unsigned long long) pf->rhit);
+	if (sel && show_stats && NULL != pf) {
+		print_u64(PRINT_ANY, "rule_hit", "(rule hit %llu ", pf->rcnt);
+		print_u64(PRINT_ANY, "success", "success %llu)", pf->rhit);
+	}
 
 	if (tb[TCA_U32_MARK]) {
 		struct tc_u32_mark *mark = RTA_DATA(tb[TCA_U32_MARK]);
@@ -1281,8 +1321,10 @@ static int u32_print_opt(struct filter_util *qu, FILE *f, struct rtattr *opt,
 		if (RTA_PAYLOAD(tb[TCA_U32_MARK]) < sizeof(*mark)) {
 			fprintf(f, "\n  Invalid mark (kernel&iproute2 mismatch)\n");
 		} else {
-			fprintf(f, "\n  mark 0x%04x 0x%04x (success %d)",
-				mark->val, mark->mask, mark->success);
+			print_nl();
+			print_0xhex(PRINT_ANY, "fwmark_value", "  mark 0x%04x ", mark->val);
+			print_0xhex(PRINT_ANY, "fwmark_mask", "0x%04x ", mark->mask);
+			print_int(PRINT_ANY, "fwmark_success", "(success %d)", mark->success);
 		}
 	}
 
@@ -1293,38 +1335,45 @@ static int u32_print_opt(struct filter_util *qu, FILE *f, struct rtattr *opt,
 			for (i = 0; i < sel->nkeys; i++) {
 				show_keys(f, sel->keys + i);
 				if (show_stats && NULL != pf)
-					fprintf(f, " (success %llu ) ",
-						(unsigned long long) pf->kcnts[i]);
+					print_u64(PRINT_ANY, "success", " (success %llu ) ",
+						  pf->kcnts[i]);
 			}
 		}
 
 		if (sel->flags & (TC_U32_VAROFFSET | TC_U32_OFFSET)) {
-			fprintf(f, "\n    offset ");
-			if (sel->flags & TC_U32_VAROFFSET)
-				fprintf(f, "%04x>>%d at %d ",
-					ntohs(sel->offmask),
-					sel->offshift,  sel->offoff);
+			print_nl();
+			print_string(PRINT_ANY, NULL, "%s", "    offset ");
+			if (sel->flags & TC_U32_VAROFFSET) {
+				print_hex(PRINT_ANY, "offset_mask", "%04x", ntohs(sel->offmask));
+				print_int(PRINT_ANY, "offset_shift", ">>%d ", sel->offshift);
+				print_int(PRINT_ANY, "offset_off", "at %d ", sel->offoff);
+			}
 			if (sel->off)
-				fprintf(f, "plus %d ", sel->off);
+				print_int(PRINT_ANY, "plus", "plus %d ", sel->off);
 		}
 		if (sel->flags & TC_U32_EAT)
-			fprintf(f, " eat ");
+			print_string(PRINT_ANY, NULL, "%s", " eat ");
 
 		if (sel->hmask) {
-			fprintf(f, "\n    hash mask %08x at %d ",
-				(unsigned int)htonl(sel->hmask), sel->hoff);
+			print_nl();
+			unsigned int hmask = (unsigned int)htonl(sel->hmask);
+
+			print_hex(PRINT_ANY, "hash_mask", "    hash mask %08x ", hmask);
+			print_int(PRINT_ANY, "hash_off", "at %d ", sel->hoff);
 		}
 	}
 
 	if (tb[TCA_U32_POLICE]) {
-		fprintf(f, "\n");
+		print_nl();
 		tc_print_police(f, tb[TCA_U32_POLICE]);
 	}
 
 	if (tb[TCA_U32_INDEV]) {
 		struct rtattr *idev = tb[TCA_U32_INDEV];
-
-		fprintf(f, "\n  input dev %s\n", rta_getattr_str(idev));
+		print_nl();
+		print_string(PRINT_ANY, "input_dev", "  input dev %s",
+			     rta_getattr_str(idev));
+		print_nl();
 	}
 
 	if (tb[TCA_U32_ACT])

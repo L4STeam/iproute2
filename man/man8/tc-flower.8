@@ -40,6 +40,10 @@ flower \- flow based traffic control filter
 .IR PRIORITY " | "
 .BR cvlan_ethtype " { " ipv4 " | " ipv6 " | "
 .IR ETH_TYPE " } | "
+.B pppoe_sid
+.IR PSID " | "
+.BR ppp_proto " { " ip " | " ipv6 " | " mpls_uc " | " mpls_mc " | "
+.IR PPP_PROTO " } | "
 .B mpls
 .IR LSE_LIST " | "
 .B mpls_label
@@ -50,7 +54,9 @@ flower \- flow based traffic control filter
 .IR BOS " | "
 .B mpls_ttl
 .IR TTL " | "
-.BR ip_proto " { " tcp " | " udp " | " sctp " | " icmp " | " icmpv6 " | "
+.B l2tpv3_sid
+.IR LSID " | "
+.BR ip_proto " { " tcp " | " udp " | " sctp " | " icmp " | " icmpv6 " | " l2tp " | "
 .IR IP_PROTO " } | "
 .B ip_tos
 .IR MASKED_IP_TOS " | "
@@ -89,6 +95,8 @@ flower \- flow based traffic control filter
 .B vxlan_opts
 |
 .B erspan_opts
+|
+.B gtp_opts
 }
 .IR OPTIONS " | "
 .BR ip_flags
@@ -162,6 +170,11 @@ provided in LLADDR format, in which case it is a bitwise mask, or as a
 number of high bits to match. If the mask is missing then a match on all
 bits is assumed.
 .TP
+.BI num_of_vlans " NUM"
+Match on the number of vlan tags in the packet.
+.I NUM
+can be 0 or small positive integer. Typically in 0-4 range.
+.TP
 .BI vlan_id " VID"
 Match on vlan tag id.
 .I VID
@@ -195,7 +208,18 @@ Match on QinQ layer three protocol.
 may be either
 .BR ipv4 ", " ipv6
 or an unsigned 16bit value in hexadecimal format.
-
+.TP
+.BI pppoe_sid " PSID"
+Match on PPPoE session id.
+.I PSID
+is an unsigned 16bit value in decimal format.
+.TP
+.BI ppp_proto " PPP_PROTO"
+Match on PPP layer three protocol.
+.I PPP_PROTO
+may be either
+.BR ip ", " ipv6 ", " mpls_uc ", " mpls_mc
+or an unsigned 16bit value in hexadecimal format.
 .TP
 .BI mpls " LSE_LIST"
 Match on the MPLS label stack.
@@ -269,11 +293,16 @@ entry.
 .I TTL
 is an unsigned 8 bit value in decimal format.
 .TP
+.BI l2tpv3_sid " LSID"
+Match on L2TPv3 session id field transported over IPv4 or IPv6.
+.I LSID
+is an unsigned 32 bit value in decimal format.
+.TP
 .BI ip_proto " IP_PROTO"
 Match on layer four protocol.
 .I IP_PROTO
 may be
-.BR tcp ", " udp ", " sctp ", " icmp ", " icmpv6
+.BR tcp ", " udp ", " sctp ", " icmp ", " icmpv6 ", " l2tp
 or an unsigned 8bit value in hexadecimal format.
 .TP
 .BI ip_tos " MASKED_IP_TOS"
@@ -391,6 +420,8 @@ rpl - The packet is in the reply direction, meaning that it is in the opposite d
 .TP
 inv - The state is invalid. The packet couldn't be associated to a connection.
 .TP
+rel - The packet is related to an existing connection.
+.TP
 Example: +trk+est
 .RE
 .TP
@@ -409,6 +440,8 @@ Match the connection zone, and can be masked.
 .BI vxlan_opts " OPTIONS"
 .TQ
 .BI erspan_opts " OPTIONS"
+.TQ
+.BI gtp_opts " OPTIONS"
 Match on IP tunnel metadata. Key id
 .I NUMBER
 is a 32 bit tunnel key id (e.g. VNI for VXLAN tunnel).
@@ -444,6 +477,12 @@ VERSION:INDEX:DIR:HWID/VERSION:INDEX_MASK:DIR_MASK:HWID_MASK, where VERSION is
 represented as a 8bit number, INDEX as an 32bit number, DIR and HWID as a 8bit
 number. Multiple options is not supported. Note INDEX/INDEX_MASK is used when
 VERSION is 1, and DIR/DIR_MASK and HWID/HWID_MASK are used when VERSION is 2.
+gtp_opts
+.I OPTIONS
+doesn't support multiple options, and it consists of a key followed by a slash
+and corresponding mask. If the mask is missing, \fBtc\fR assumes a full-length
+match. The option can be described in the form PDU_TYPE:QFI/PDU_TYPE_MASK:QFI_MASK
+where both PDU_TYPE and QFI are represented as a 8bit hexadecimal values.
 .TP
 .BI ip_flags " IP_FLAGS"
 .I IP_FLAGS

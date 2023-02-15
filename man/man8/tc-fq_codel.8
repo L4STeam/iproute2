@@ -20,6 +20,8 @@ BYTES ] [
 ] [
 .B ce_threshold
 TIME ] [
+.B ce_threshold_selector
+VALUE/MASK ] [
 .B memory_limit
 BYTES ]
 
@@ -64,7 +66,8 @@ the local minimum queue delay that packets experience. Default value is 5ms.
 has the same semantics as
 .B codel
 and is used to ensure that the measured minimum delay does not become too stale.
-The minimum delay must be experienced in the last epoch of length .B interval.
+The minimum delay must be experienced in the last epoch of length 
+.BR interval .
 It should be set on the order of the worst-case RTT through the bottleneck to
 give endpoints sufficient time to react. Default value is 100ms.
 
@@ -88,6 +91,22 @@ is turned on by default.
 sets a threshold above which all packets are marked with ECN Congestion
 Experienced. This is useful for DCTCP-style congestion control algorithms that
 require marking at very shallow queueing thresholds.
+
+.SS ce_threshold_selector
+sets a filter so that the
+.B ce_threshold
+feature is applied to only a subset of the traffic seen by the qdisc. If set, the MASK value
+will be applied as a bitwise AND to the diffserv/ECN byte of the IP header, and only if the
+result of this masking equals VALUE, will the
+.B ce_threshold
+logic be applied to the packet.
+
+.SS drop_batch
+sets the maximum number of packets to drop when
+.B limit
+or
+.B memory_limit
+is exceeded. Default value is 64.
 
 .SH EXAMPLES
 #tc qdisc add   dev eth0 root fq_codel

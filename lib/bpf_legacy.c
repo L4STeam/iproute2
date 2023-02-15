@@ -1,10 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * bpf.c	BPF common code
- *
- *		This program is free software; you can distribute it and/or
- *		modify it under the terms of the GNU General Public License
- *		as published by the Free Software Foundation; either version
- *		2 of the License, or (at your option) any later version.
  *
  * Authors:	Daniel Borkmann <daniel@iogearbox.net>
  *		Jiri Pirko <jiri@resnulli.us>
@@ -33,7 +29,6 @@
 #include <sys/un.h>
 #include <sys/vfs.h>
 #include <sys/mount.h>
-#include <sys/syscall.h>
 #include <sys/sendfile.h>
 #include <sys/resource.h>
 
@@ -134,17 +129,6 @@ static inline __u64 bpf_ptr_to_u64(const void *ptr)
 	return (__u64)(unsigned long)ptr;
 }
 
-static int bpf(int cmd, union bpf_attr *attr, unsigned int size)
-{
-#ifdef __NR_bpf
-	return syscall(__NR_bpf, cmd, attr, size);
-#else
-	fprintf(stderr, "No bpf syscall, kernel headers too old?\n");
-	errno = ENOSYS;
-	return -1;
-#endif
-}
-
 static int bpf_map_update(int fd, const void *key, const void *value,
 			  uint64_t flags)
 {
@@ -203,12 +187,30 @@ int bpf_dump_prog_info(FILE *f, uint32_t id)
 	if (!ret && len) {
 		int jited = !!info.jited_prog_len;
 
+		print_string(PRINT_ANY, "name", "name %s ", info.name);
 		print_string(PRINT_ANY, "tag", "tag %s ",
 			     hexstring_n2a(info.tag, sizeof(info.tag),
 					   tmp, sizeof(tmp)));
 		print_uint(PRINT_JSON, "jited", NULL, jited);
 		if (jited && !is_json_context())
 			fprintf(f, "jited ");
+
+		if (show_details) {
+			if (info.load_time) {
+				/* ns since boottime */
+				print_lluint(PRINT_ANY, "load_time",
+					     "load_time %llu ", info.load_time);
+
+				print_luint(PRINT_ANY, "created_by_uid",
+					    "created_by_uid %lu ",
+					    info.created_by_uid);
+			}
+
+			if (info.btf_id)
+				print_luint(PRINT_ANY, "btf_id", "btf_id %lu ",
+					    info.btf_id);
+		}
+
 		dump_ok = 1;
 	}
 
@@ -513,9 +515,12 @@ static int bpf_mnt_check_target(const char *target)
 	int ret;
 
 	ret = mkdir(target, S_IRWXU);
-	if (ret && errno != EEXIST)
+	if (ret) {
+		if (errno == EEXIST)
+			return 0;
 		fprintf(stderr, "mkdir %s failed: %s\n", target,
 			strerror(errno));
+	}
 
 	return ret;
 }
@@ -822,7 +827,7 @@ static int bpf_obj_pinned(const char *pathname, enum bpf_prog_type type)
 
 static int bpf_do_parse(struct bpf_cfg_in *cfg, const bool *opt_tbl)
 {
-	const char *file, *section, *uds_name;
+	const char *file, *section, *uds_name, *prog_name;
 	bool verbose = false;
 	int i, ret, argc;
 	char **argv;
@@ -853,7 +858,7 @@ static int bpf_do_parse(struct bpf_cfg_in *cfg, const bool *opt_tbl)
 	}
 
 	NEXT_ARG();
-	file = section = uds_name = NULL;
+	file = section = uds_name = prog_name = NULL;
 	if (cfg->mode == EBPF_OBJECT || cfg->mode == EBPF_PINNED) {
 		file = *argv;
 		NEXT_ARG_FWD();
@@ -887,6 +892,12 @@ static int bpf_do_parse(struct bpf_cfg_in *cfg, const bool *opt_tbl)
 		if (argc > 0 && matches(*argv, "section") == 0) {
 			NEXT_ARG();
 			section = *argv;
+			NEXT_ARG_FWD();
+		}
+
+		if (argc > 0 && strcmp(*argv, "program") == 0) {
+			NEXT_ARG();
+			prog_name = *argv;
 			NEXT_ARG_FWD();
 		}
 
@@ -927,6 +938,7 @@ static int bpf_do_parse(struct bpf_cfg_in *cfg, const bool *opt_tbl)
 	cfg->argc    = argc;
 	cfg->argv    = argv;
 	cfg->verbose = verbose;
+	cfg->prog_name = prog_name;
 
 	return ret;
 }
@@ -1103,6 +1115,13 @@ int bpf_prog_load_dev(enum bpf_prog_type type, const struct bpf_insn *insns,
 	}
 
 	return bpf(BPF_PROG_LOAD, &attr, sizeof(attr));
+}
+
+int bpf_program_load(enum bpf_prog_type type, const struct bpf_insn *insns,
+		     size_t size_insns, const char *license, char *log,
+		     size_t size_log)
+{
+	return bpf_prog_load_dev(type, insns, size_insns, license, 0, log, size_log);
 }
 
 #ifdef HAVE_ELF
@@ -1531,7 +1550,7 @@ retry:
 		 * into our buffer. Still, try to give a debuggable error
 		 * log for the user, so enlarge it and re-fail.
 		 */
-		if (fd < 0 && (errno == ENOSPC || !ctx->log_size)) {
+		if (fd < 0 && errno == ENOSPC) {
 			if (tries++ < 10 && !bpf_log_realloc(ctx))
 				goto retry;
 
@@ -2069,7 +2088,7 @@ retry:
 	fd = bpf_btf_load(ctx->btf_data->d_buf, ctx->btf_data->d_size,
 			  ctx->log, ctx->log_size);
 	if (fd < 0 || ctx->verbose) {
-		if (fd < 0 && (errno == ENOSPC || !ctx->log_size)) {
+		if (fd < 0 && errno == ENOSPC) {
 			if (tries++ < 10 && !bpf_log_realloc(ctx))
 				goto retry;
 
@@ -2992,7 +3011,7 @@ static int bpf_obj_open(const char *pathname, enum bpf_prog_type type,
 out:
 	bpf_elf_ctx_destroy(ctx, ret < 0);
 	if (ret < 0) {
-		if (fd)
+		if (fd >= 0)
 			close(fd);
 		return ret;
 	}
@@ -3284,8 +3303,7 @@ bool iproute2_is_map_in_map(const char *libbpf_map_name, struct bpf_elf_map *ima
 			continue;
 
 		if (!ctx->maps[i].id ||
-		    ctx->maps[i].inner_id ||
-		    ctx->maps[i].inner_idx == -1)
+		    ctx->maps[i].inner_id)
 			continue;
 
 		*imap = ctx->maps[i];
@@ -3298,6 +3316,9 @@ bool iproute2_is_map_in_map(const char *libbpf_map_name, struct bpf_elf_map *ima
 
 			*omap = ctx->maps[j];
 			outer_map_name = bpf_map_fetch_name(ctx, j);
+			if (!outer_map_name)
+				return false;
+
 			memcpy(omap_name, outer_map_name, strlen(outer_map_name) + 1);
 
 			return true;

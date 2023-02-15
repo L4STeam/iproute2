@@ -1,13 +1,6 @@
+// SPDX-License-Identifier: GPL-2.0-only
 /*
- * q_netem.c		NETEM.
- *
- *		This program is free software; you can redistribute it and/or
- *		modify it under the terms of the GNU General Public License
- *		as published by the Free Software Foundation; either version
- *		2 of the License, or (at your option) any later version.
- *
- * Authors:	Stephen Hemminger <shemminger@linux-foundation.org>
- *
+ * Author:	Stephen Hemminger <shemminger@linux-foundation.org>
  */
 
 #include <stdio.h>
@@ -30,22 +23,20 @@
 static void explain(void)
 {
 	fprintf(stderr,
-		"Usage: ... netem	[ limit PACKETS ]\n" \
-		"			[ delay TIME [ JITTER [CORRELATION]]]\n" \
-		"			[ distribution {uniform|normal|pareto|paretonormal} ]\n" \
-		"			[ corrupt PERCENT [CORRELATION]]\n" \
-		"			[ duplicate PERCENT [CORRELATION]]\n" \
-		"			[ loss random PERCENT [CORRELATION]]\n" \
-		"			[ loss state P13 [P31 [P32 [P23 P14]]]\n" \
-		"			[ loss gemodel PERCENT [R [1-H [1-K]]]\n" \
-		"			[ ecn ]\n" \
-		"			[ reorder PERCENT [CORRELATION] [ gap DISTANCE ]]\n" \
-		"			[ rate RATE [PACKETOVERHEAD] [CELLSIZE] [CELLOVERHEAD]]\n" \
-		"			[ slot MIN_DELAY [MAX_DELAY] [packets MAX_PACKETS]" \
-		" [bytes MAX_BYTES]]\n" \
-		"		[ slot distribution" \
-		" {uniform|normal|pareto|paretonormal|custom} DELAY JITTER" \
-		" [packets MAX_PACKETS] [bytes MAX_BYTES]]\n");
+		"Usage: ... netem [ limit PACKETS ]\n"
+		"                 [ delay TIME [ JITTER [CORRELATION]]]\n"
+		"                 [ distribution {uniform|normal|pareto|paretonormal} ]\n"
+		"                 [ corrupt PERCENT [CORRELATION]]\n"
+		"                 [ duplicate PERCENT [CORRELATION]]\n"
+		"                 [ loss random PERCENT [CORRELATION]]\n"
+		"                 [ loss state P13 [P31 [P32 [P23 P14]]]\n"
+		"                 [ loss gemodel PERCENT [R [1-H [1-K]]]\n"
+		"                 [ ecn ]\n"
+		"                 [ reorder PERCENT [CORRELATION] [ gap DISTANCE ]]\n"
+		"                 [ rate RATE [PACKETOVERHEAD] [CELLSIZE] [CELLOVERHEAD]]\n"
+		"                 [ slot MIN_DELAY [MAX_DELAY] [packets MAX_PACKETS] [bytes MAX_BYTES]]\n"
+		"                 [ slot distribution {uniform|normal|pareto|paretonormal|custom}\n"
+		"                   DELAY JITTER [packets MAX_PACKETS] [bytes MAX_BYTES]]\n");
 }
 
 static void explain1(const char *arg)
@@ -59,10 +50,12 @@ static void explain1(const char *arg)
 #define MAX_DIST	(16*1024)
 
 /* Print values only if they are non-zero */
-static void __print_int_opt(const char *label_json, const char *label_fp,
-			    int val)
+static void __attribute__((format(printf, 2, 0)))
+__print_int_opt(const char *label_json, const char *label_fp, int val)
 {
-	print_int(PRINT_ANY, label_json, val ? label_fp : "", val);
+	print_int(PRINT_JSON, label_json, NULL, val);
+	if (val != 0)
+		print_int(PRINT_FP, NULL, label_fp, val);
 }
 #define PRINT_INT_OPT(label, val)			\
 	__print_int_opt(label, " " label " %d", (val))
@@ -70,8 +63,8 @@ static void __print_int_opt(const char *label_json, const char *label_fp,
 /* Time print prints normally with varying units, but for JSON prints
  * in seconds (1ms vs 0.001).
  */
-static void __print_time64(const char *label_json, const char *label_fp,
-			   __u64 val)
+static void __attribute__((format(printf, 2, 0)))
+__print_time64(const char *label_json, const char *label_fp, __u64 val)
 {
 	SPRINT_BUF(b1);
 
@@ -85,8 +78,8 @@ static void __print_time64(const char *label_json, const char *label_fp,
 /* Percent print prints normally in percentage points, but for JSON prints
  * an absolute value (1% vs 0.01).
  */
-static void __print_percent(const char *label_json, const char *label_fp,
-			    __u32 per)
+static void __attribute__((format(printf, 2, 0)))
+__print_percent(const char *label_json, const char *label_fp, __u32 per)
 {
 	print_float(PRINT_FP, NULL, label_fp, (100. * per) / UINT32_MAX);
 	print_float(PRINT_JSON, label_json, NULL, (1. * per) / UINT32_MAX);
@@ -138,7 +131,8 @@ static int get_distribution(const char *type, __s16 *data, int maxdata)
 	char name[128];
 
 	snprintf(name, sizeof(name), "%s/%s.dist", get_tc_lib(), type);
-	if ((f = fopen(name, "r")) == NULL) {
+	f = fopen(name, "r");
+	if (f == NULL) {
 		fprintf(stderr, "No distribution data for %s (%s: %s)\n",
 			type, name, strerror(errno));
 		return -1;
@@ -175,8 +169,10 @@ static int get_distribution(const char *type, __s16 *data, int maxdata)
 #define NEXT_IS_SIGNED_NUMBER() \
 	(NEXT_ARG_OK() && (isdigit(argv[1][0]) || argv[1][0] == '-'))
 
-/* Adjust for the fact that psched_ticks aren't always usecs
-   (based on kernel PSCHED_CLOCK configuration */
+/*
+ * Adjust for the fact that psched_ticks aren't always usecs
+ *  (based on kernel PSCHED_CLOCK configuration
+ */
 static int get_ticks(__u32 *ticks, const char *str)
 {
 	unsigned int t;
@@ -258,7 +254,7 @@ static int netem_parse_opt(struct qdisc_util *qu, int argc, char **argv,
 
 			if (!strcmp(*argv, "random")) {
 				NEXT_ARG();
-			random_loss_model:
+random_loss_model:
 				if (get_percent(&opt.loss, *argv)) {
 					explain1("loss percent");
 					return -1;
@@ -267,7 +263,7 @@ static int netem_parse_opt(struct qdisc_util *qu, int argc, char **argv,
 					NEXT_ARG();
 					++present[TCA_NETEM_CORR];
 					if (get_percent(&cor.loss_corr, *argv)) {
-						explain1("loss correllation");
+						explain1("loss correlation");
 						return -1;
 					}
 				}
@@ -523,6 +519,7 @@ static int netem_parse_opt(struct qdisc_util *qu, int argc, char **argv,
 			if (NEXT_ARG_OK() &&
 			    matches(*(argv+1), "bytes") == 0) {
 				unsigned int max_bytes;
+
 				NEXT_ARG();
 				if (!NEXT_ARG_OK() ||
 				    get_size(&max_bytes, *(argv+1))) {
@@ -532,11 +529,9 @@ static int netem_parse_opt(struct qdisc_util *qu, int argc, char **argv,
 				slot.max_bytes = (int) max_bytes;
 				NEXT_ARG();
 			}
-		} else if (strcmp(*argv, "help") == 0) {
-			explain();
-			return -1;
 		} else {
-			fprintf(stderr, "What is \"%s\"?\n", *argv);
+			if (strcmp(*argv, "help") != 0)
+				fprintf(stderr, "What is \"%s\"?\n", *argv);
 			explain();
 			return -1;
 		}
@@ -802,9 +797,10 @@ static int netem_print_opt(struct qdisc_util *qu, FILE *f, struct rtattr *opt)
 		rate64 = rate64 ? : rate->rate;
 		tc_print_rate(PRINT_ANY, "rate", " rate %s", rate64);
 		PRINT_INT_OPT("packetoverhead", rate->packet_overhead);
-		print_uint(PRINT_ANY, "cellsize",
-			   rate->cell_size ? " cellsize %u" : "",
-			   rate->cell_size);
+
+		print_uint(PRINT_JSON, "cellsize", NULL, rate->cell_size);
+		if (rate->cell_size)
+			print_uint(PRINT_FP, NULL, " cellsize %u", rate->cell_size);
 		PRINT_INT_OPT("celloverhead", rate->cell_overhead);
 		close_json_object();
 	}
@@ -824,9 +820,13 @@ static int netem_print_opt(struct qdisc_util *qu, FILE *f, struct rtattr *opt)
 		close_json_object();
 	}
 
-	print_bool(PRINT_ANY, "ecn", ecn ? " ecn " : "", ecn);
-	print_luint(PRINT_ANY, "gap", qopt.gap ? " gap %lu" : "",
-		    (unsigned long)qopt.gap);
+	print_bool(PRINT_JSON, "ecn", NULL, ecn);
+	if (ecn)
+		print_bool(PRINT_FP, NULL, " ecn ", ecn);
+
+	print_luint(PRINT_JSON, "gap", NULL, qopt.gap);
+	if (qopt.gap)
+		print_luint(PRINT_FP, NULL, " gap %lu", qopt.gap);
 
 	return 0;
 }

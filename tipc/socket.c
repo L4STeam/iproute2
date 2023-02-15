@@ -1,10 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * socket.c	TIPC socket functionality.
- *
- *		This program is free software; you can redistribute it and/or
- *		modify it under the terms of the GNU General Public License
- *		as published by the Free Software Foundation; either version
- *		2 of the License, or (at your option) any later version.
  *
  * Authors:	Richard Alpe <richard.alpe@ericsson.com>
  */
@@ -17,6 +13,7 @@
 #include <linux/genetlink.h>
 #include <libmnl/libmnl.h>
 
+#include "mnl_utils.h"
 #include "cmdl.h"
 #include "msg.h"
 #include "socket.h"
@@ -45,12 +42,21 @@ static int publ_list_cb(const struct nlmsghdr *nlh, void *data)
 
 static int publ_list(uint32_t sock)
 {
+	struct mnlu_gen_socket sock_nlg;
 	struct nlmsghdr *nlh;
-	char buf[MNL_SOCKET_BUFFER_SIZE];
 	struct nlattr *nest;
+	int err;
 
-	if (!(nlh = msg_init(buf, TIPC_NL_PUBL_GET))) {
+	err = mnlu_gen_socket_open(&sock_nlg, TIPC_GENL_V2_NAME,
+				   TIPC_GENL_V2_VERSION);
+	if (err)
+		return -1;
+
+	nlh = mnlu_gen_socket_cmd_prepare(&sock_nlg, TIPC_NL_PUBL_GET,
+					  NLM_F_REQUEST | NLM_F_DUMP);
+	if (!nlh) {
 		fprintf(stderr, "error, message initialisation failed\n");
+		mnlu_gen_socket_close(&sock_nlg);
 		return -1;
 	}
 
@@ -58,7 +64,9 @@ static int publ_list(uint32_t sock)
 	mnl_attr_put_u32(nlh, TIPC_NLA_SOCK_REF, sock);
 	mnl_attr_nest_end(nlh, nest);
 
-	return msg_dumpit(nlh, publ_list_cb, NULL);
+	err = mnlu_gen_socket_sndrcv(&sock_nlg, nlh, publ_list_cb, NULL);
+	mnlu_gen_socket_close(&sock_nlg);
+	return err;
 }
 
 static int sock_list_cb(const struct nlmsghdr *nlh, void *data)
@@ -103,14 +111,13 @@ static int sock_list_cb(const struct nlmsghdr *nlh, void *data)
 static int cmd_socket_list(struct nlmsghdr *nlh, const struct cmd *cmd,
 			   struct cmdl *cmdl, void *data)
 {
-	char buf[MNL_SOCKET_BUFFER_SIZE];
-
 	if (help_flag) {
 		fprintf(stderr, "Usage: %s socket list\n", cmdl->argv[0]);
 		return -EINVAL;
 	}
 
-	if (!(nlh = msg_init(buf, TIPC_NL_SOCK_GET))) {
+	nlh = msg_init(TIPC_NL_SOCK_GET);
+	if (!nlh) {
 		fprintf(stderr, "error, message initialisation failed\n");
 		return -1;
 	}
