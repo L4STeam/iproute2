@@ -85,6 +85,20 @@ devlink-dev \- devlink device configuration
 .I ID
 ]
 
+.ti -8
+.B devlink dev selftests show
+[
+.I DEV
+]
+
+.ti -8
+.B devlink dev selftests run
+.I DEV
+[
+.B id
+.I ID...
+]
+
 .SH "DESCRIPTION"
 .SS devlink dev show - display devlink device attributes
 
@@ -199,7 +213,7 @@ pending this action will reload current firmware image.
 
 .B limit no_reset
 - Specifies limitation on reload action.
-If this argument is omitted limit is unspecificed and the reload action is not
+If this argument is omitted limit is unspecified and the reload action is not
 limited. In such case driver implementation may include reset or downtime as
 needed to perform the actions.
 
@@ -236,7 +250,7 @@ If this argument is omitted all devices are listed.
 .B file
 .I PATH
 - Path to the file which will be written into device's flash. The path needs
-to be relative to one of the directories searched by the kernel firmware loaded,
+to be relative to one of the directories searched by the kernel firmware loader,
 such as /lib/firmware.
 
 .B component
@@ -248,6 +262,28 @@ The value of
 should match the component names from
 .B "devlink dev info"
 and may be driver-dependent.
+
+.SS devlink dev selftests show - shows supported selftests on devlink device.
+
+.PP
+.I "DEV"
+- specifies the devlink device.
+If this argument is omitted all selftests for devlink devices are listed.
+
+.SS devlink dev selftests run - runs selftests on devlink device.
+
+.PP
+.I "DEV"
+- specifies the devlink device to execute selftests.
+
+.B id
+.I  ID...
+- The value of
+.I ID(s)
+should match the selftests shown in
+.B "devlink dev selftests show"
+to execute selftests on the devlink device.
+If this argument is omitted all selftests supported by devlink devices are executed.
 
 .SH "EXAMPLES"
 .PP
@@ -295,6 +331,16 @@ Preparing to flash
 Flashing 100%
 .br
 Flashing done
+.RE
+.PP
+devlink dev selftests show pci/0000:01:00.0
+.RS 4
+Shows the supported selftests by the devlink device.
+.RE
+.PP
+devlink dev selftests run pci/0000:01:00.0 id flash
+.RS 4
+Perform a flash test on the devlink device.
 .RE
 
 .SH SEE ALSO

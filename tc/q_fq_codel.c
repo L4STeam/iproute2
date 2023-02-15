@@ -1,38 +1,8 @@
+// SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
 /*
  * Fair Queue Codel
  *
  *  Copyright (C) 2012,2015 Eric Dumazet <edumazet@google.com>
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions, and the following disclaimer,
- *    without modification.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in the
- *    documentation and/or other materials provided with the distribution.
- * 3. The names of the authors may not be used to endorse or promote products
- *    derived from this software without specific prior written permission.
- *
- * Alternatively, provided that this notice is retained in full, this
- * software may be distributed under the terms of the GNU General
- * Public License ("GPL") version 2, in which case the provisions of the
- * GPL apply INSTEAD OF those given above.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
- * DAMAGE.
- *
  */
 
 #include <stdio.h>
@@ -55,6 +25,7 @@ static void explain(void)
 					"[ target TIME ] [ interval TIME ]\n"
 					"[ quantum BYTES ] [ [no]ecn ]\n"
 					"[ ce_threshold TIME ]\n"
+					"[ ce_threshold_selector VALUE/MASK ]\n"
 					"[ drop_batch SIZE ]\n");
 }
 
@@ -69,6 +40,8 @@ static int fq_codel_parse_opt(struct qdisc_util *qu, int argc, char **argv,
 	unsigned int quantum = 0;
 	unsigned int ce_threshold = ~0U;
 	unsigned int memory = ~0U;
+	__u8 ce_threshold_mask = 0;
+	__u8 ce_threshold_selector = 0xFF;
 	int ecn = -1;
 	struct rtattr *tail;
 
@@ -107,6 +80,24 @@ static int fq_codel_parse_opt(struct qdisc_util *qu, int argc, char **argv,
 			NEXT_ARG();
 			if (get_time(&ce_threshold, *argv)) {
 				fprintf(stderr, "Illegal \"ce_threshold\"\n");
+				return -1;
+			}
+		} else if (strcmp(*argv, "ce_threshold_selector") == 0) {
+			char *sep;
+
+			NEXT_ARG();
+			sep = strchr(*argv, '/');
+			if (!sep) {
+				fprintf(stderr, "Missing mask for \"ce_threshold_selector\"\n");
+				return -1;
+			}
+			*sep++ = '\0';
+			if (get_u8(&ce_threshold_mask, sep, 0)) {
+				fprintf(stderr, "Illegal mask for \"ce_threshold_selector\"\n");
+				return -1;
+			}
+			if (get_u8(&ce_threshold_selector, *argv, 0)) {
+				fprintf(stderr, "Illegal \"ce_threshold_selector\"\n");
 				return -1;
 			}
 		} else if (strcmp(*argv, "memory_limit") == 0) {
@@ -152,6 +143,10 @@ static int fq_codel_parse_opt(struct qdisc_util *qu, int argc, char **argv,
 	if (ce_threshold != ~0U)
 		addattr_l(n, 1024, TCA_FQ_CODEL_CE_THRESHOLD,
 			  &ce_threshold, sizeof(ce_threshold));
+	if (ce_threshold_selector != 0xFF) {
+		addattr8(n, 1024, TCA_FQ_CODEL_CE_THRESHOLD_MASK, ce_threshold_mask);
+		addattr8(n, 1024, TCA_FQ_CODEL_CE_THRESHOLD_SELECTOR, ce_threshold_selector);
+	}
 	if (memory != ~0U)
 		addattr_l(n, 1024, TCA_FQ_CODEL_MEMORY_LIMIT,
 			  &memory, sizeof(memory));
@@ -172,6 +167,8 @@ static int fq_codel_print_opt(struct qdisc_util *qu, FILE *f, struct rtattr *opt
 	unsigned int ecn;
 	unsigned int quantum;
 	unsigned int ce_threshold;
+	__u8 ce_threshold_selector = 0;
+	__u8 ce_threshold_mask = 0;
 	unsigned int memory_limit;
 	unsigned int drop_batch;
 
@@ -211,6 +208,19 @@ static int fq_codel_print_opt(struct qdisc_util *qu, FILE *f, struct rtattr *opt
 		print_string(PRINT_FP, NULL, "ce_threshold %s ",
 			     sprint_time(ce_threshold, b1));
 	}
+	if (tb[TCA_FQ_CODEL_CE_THRESHOLD_SELECTOR] &&
+	    RTA_PAYLOAD(tb[TCA_FQ_CODEL_CE_THRESHOLD_SELECTOR]) >= sizeof(__u8))
+		ce_threshold_selector = rta_getattr_u8(tb[TCA_FQ_CODEL_CE_THRESHOLD_SELECTOR]);
+	if (tb[TCA_FQ_CODEL_CE_THRESHOLD_MASK] &&
+	    RTA_PAYLOAD(tb[TCA_FQ_CODEL_CE_THRESHOLD_MASK]) >= sizeof(__u8))
+		ce_threshold_mask = rta_getattr_u8(tb[TCA_FQ_CODEL_CE_THRESHOLD_MASK]);
+	if (ce_threshold_mask || ce_threshold_selector) {
+		print_hhu(PRINT_ANY, "ce_threshold_selector", "ce_threshold_selector %#x",
+			  ce_threshold_selector);
+		print_hhu(PRINT_ANY, "ce_threshold_mask", "/%#x ",
+			  ce_threshold_mask);
+	}
+
 	if (tb[TCA_FQ_CODEL_INTERVAL] &&
 	    RTA_PAYLOAD(tb[TCA_FQ_CODEL_INTERVAL]) >= sizeof(__u32)) {
 		interval = rta_getattr_u32(tb[TCA_FQ_CODEL_INTERVAL]);

@@ -1,30 +1,39 @@
 // SPDX-License-Identifier: GPL-2.0
 
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <stdbool.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
-#include <rt_names.h>
-#include <errno.h>
 
 #include <linux/genetlink.h>
+#include <linux/netlink.h>
+#include <linux/rtnetlink.h>
 #include <linux/mptcp.h>
 
 #include "utils.h"
 #include "ip_common.h"
-#include "libgenl.h"
 #include "json_print.h"
+#include "libgenl.h"
+#include "libnetlink.h"
+#include "ll_map.h"
 
 static void usage(void)
 {
 	fprintf(stderr,
 		"Usage:	ip mptcp endpoint add ADDRESS [ dev NAME ] [ id ID ]\n"
-		"				      [ FLAG-LIST ]\n"
-		"	ip mptcp endpoint delete id ID\n"
+		"				      [ port NR ] [ FLAG-LIST ]\n"
+		"	ip mptcp endpoint delete id ID [ ADDRESS ]\n"
+		"	ip mptcp endpoint change [ id ID ] [ ADDRESS ] [ port NR ] CHANGE-OPT\n"
 		"	ip mptcp endpoint show [ id ID ]\n"
 		"	ip mptcp endpoint flush\n"
 		"	ip mptcp limits set [ subflows NR ] [ add_addr_accepted NR ]\n"
 		"	ip mptcp limits show\n"
+		"	ip mptcp monitor\n"
 		"FLAG-LIST := [ FLAG-LIST ] FLAG\n"
-		"FLAG  := [ signal | subflow | backup ]\n");
+		"FLAG  := [ signal | subflow | backup | fullmesh ]\n"
+		"CHANGE-OPT := [ backup | nobackup | fullmesh | nofullmesh ]\n");
 
 	exit(-1);
 }
@@ -38,6 +47,8 @@ static int genl_family = -1;
 	GENL_REQUEST(_req, MPTCP_BUFLEN, genl_family, 0,	\
 		     MPTCP_PM_VER, _cmd, _flags)
 
+#define MPTCP_PM_ADDR_FLAG_NONE 0x0
+
 /* Mapping from argument to address flag mask */
 static const struct {
 	const char *name;
@@ -46,6 +57,9 @@ static const struct {
 	{ "signal",		MPTCP_PM_ADDR_FLAG_SIGNAL },
 	{ "subflow",		MPTCP_PM_ADDR_FLAG_SUBFLOW },
 	{ "backup",		MPTCP_PM_ADDR_FLAG_BACKUP },
+	{ "fullmesh",		MPTCP_PM_ADDR_FLAG_FULLMESH },
+	{ "nobackup",		MPTCP_PM_ADDR_FLAG_NONE },
+	{ "nofullmesh",		MPTCP_PM_ADDR_FLAG_NONE }
 };
 
 static void print_mptcp_addr_flags(unsigned int flags)
@@ -88,20 +102,34 @@ static int get_flags(const char *arg, __u32 *flags)
 	return -1;
 }
 
-static int mptcp_parse_opt(int argc, char **argv, struct nlmsghdr *n,
-			 bool adding)
+static int mptcp_parse_opt(int argc, char **argv, struct nlmsghdr *n, int cmd)
 {
+	bool setting = cmd == MPTCP_PM_CMD_SET_FLAGS;
+	bool adding = cmd == MPTCP_PM_CMD_ADD_ADDR;
+	bool deling = cmd == MPTCP_PM_CMD_DEL_ADDR;
 	struct rtattr *attr_addr;
 	bool addr_set = false;
 	inet_prefix address;
 	bool id_set = false;
 	__u32 index = 0;
 	__u32 flags = 0;
+	__u16 port = 0;
 	__u8 id = 0;
 
 	ll_init_map(&rth);
 	while (argc > 0) {
 		if (get_flags(*argv, &flags) == 0) {
+			if (adding &&
+			    (flags & MPTCP_PM_ADDR_FLAG_SIGNAL) &&
+			    (flags & MPTCP_PM_ADDR_FLAG_FULLMESH))
+				invarg("flags mustn't have both signal and fullmesh", *argv);
+
+			/* allow changing the 'backup' and 'fullmesh' flags only */
+			if (setting &&
+			    (flags & ~(MPTCP_PM_ADDR_FLAG_BACKUP |
+				       MPTCP_PM_ADDR_FLAG_FULLMESH)))
+				invarg("invalid flags, backup and fullmesh only", *argv);
+
 		} else if (matches(*argv, "id") == 0) {
 			NEXT_ARG();
 
@@ -123,6 +151,10 @@ static int mptcp_parse_opt(int argc, char **argv, struct nlmsghdr *n,
 			if (!index)
 				invarg("device does not exist\n", ifname);
 
+		} else if (matches(*argv, "port") == 0) {
+			NEXT_ARG();
+			if (get_u16(&port, *argv, 0))
+				invarg("expected port", *argv);
 		} else if (get_addr(&address, *argv, AF_UNSPEC) == 0) {
 			addr_set = true;
 		} else {
@@ -134,8 +166,20 @@ static int mptcp_parse_opt(int argc, char **argv, struct nlmsghdr *n,
 	if (!addr_set && adding)
 		missarg("ADDRESS");
 
-	if (!id_set && !adding)
+	if (!id_set && deling) {
 		missarg("ID");
+	} else if (id_set && deling) {
+		if (id && addr_set)
+			invarg("invalid for non-zero id address\n", "ADDRESS");
+		else if (!id && !addr_set)
+			invarg("address is needed for deleting id 0 address\n", "ID");
+	}
+
+	if (adding && port && !(flags & MPTCP_PM_ADDR_FLAG_SIGNAL))
+		invarg("flags must have signal when using port", "port");
+
+	if (setting && id_set && port)
+		invarg("port can't be used with id", "port");
 
 	attr_addr = addattr_nest(n, MPTCP_BUFLEN,
 				 MPTCP_PM_ATTR_ADDR | NLA_F_NESTED);
@@ -145,6 +189,8 @@ static int mptcp_parse_opt(int argc, char **argv, struct nlmsghdr *n,
 		addattr32(n, MPTCP_BUFLEN, MPTCP_PM_ADDR_ATTR_FLAGS, flags);
 	if (index)
 		addattr32(n, MPTCP_BUFLEN, MPTCP_PM_ADDR_ATTR_IF_IDX, index);
+	if (port)
+		addattr16(n, MPTCP_BUFLEN, MPTCP_PM_ADDR_ATTR_PORT, port);
 	if (addr_set) {
 		int type;
 
@@ -165,7 +211,7 @@ static int mptcp_addr_modify(int argc, char **argv, int cmd)
 	MPTCP_REQUEST(req, cmd, NLM_F_REQUEST);
 	int ret;
 
-	ret = mptcp_parse_opt(argc, argv, &req.n, cmd == MPTCP_PM_CMD_ADD_ADDR);
+	ret = mptcp_parse_opt(argc, argv, &req.n, cmd);
 	if (ret)
 		return ret;
 
@@ -181,8 +227,8 @@ static int print_mptcp_addrinfo(struct rtattr *addrinfo)
 	__u8 family = AF_UNSPEC, addr_attr_type;
 	const char *ifname;
 	unsigned int flags;
+	__u16 id, port;
 	int index;
-	__u16 id;
 
 	parse_rtattr_nested(tb, MPTCP_PM_ADDR_ATTR_MAX, addrinfo);
 
@@ -195,6 +241,11 @@ static int print_mptcp_addrinfo(struct rtattr *addrinfo)
 	if (tb[addr_attr_type]) {
 		print_string(PRINT_ANY, "address", "%s ",
 			     format_host_rta(family, tb[addr_attr_type]));
+	}
+	if (tb[MPTCP_PM_ADDR_ATTR_PORT]) {
+		port = rta_getattr_u16(tb[MPTCP_PM_ADDR_ATTR_PORT]);
+		if (port)
+			print_uint(PRINT_ANY, "port", "port %u ", port);
 	}
 	if (tb[MPTCP_PM_ADDR_ATTR_ID]) {
 		id = rta_getattr_u8(tb[MPTCP_PM_ADDR_ATTR_ID]);
@@ -262,7 +313,7 @@ static int mptcp_addr_dump(void)
 		return -2;
 	}
 
-	close_json_object();
+	delete_json_obj();
 	fflush(stdout);
 	return 0;
 }
@@ -276,14 +327,19 @@ static int mptcp_addr_show(int argc, char **argv)
 	if (argc <= 0)
 		return mptcp_addr_dump();
 
-	ret = mptcp_parse_opt(argc, argv, &req.n, false);
+	ret = mptcp_parse_opt(argc, argv, &req.n, MPTCP_PM_CMD_GET_ADDR);
 	if (ret)
 		return ret;
 
 	if (rtnl_talk(&genl_rth, &req.n, &answer) < 0)
 		return -2;
 
-	return print_mptcp_addr(answer, stdout);
+	new_json_obj(json);
+	ret = print_mptcp_addr(answer, stdout);
+	delete_json_obj();
+	free(answer);
+	fflush(stdout);
+	return ret;
 }
 
 static int mptcp_addr_flush(int argc, char **argv)
@@ -380,8 +436,119 @@ static int mptcp_limit_get_set(int argc, char **argv, int cmd)
 	if (rtnl_talk(&genl_rth, &req.n, do_get ? &answer : NULL) < 0)
 		return -2;
 
-	if (do_get)
-		return print_mptcp_limit(answer, stdout);
+	ret = 0;
+	if (do_get) {
+		ret = print_mptcp_limit(answer, stdout);
+		free(answer);
+	}
+
+	return ret;
+}
+
+static const char * const event_to_str[] = {
+	[MPTCP_EVENT_CREATED] = "CREATED",
+	[MPTCP_EVENT_ESTABLISHED] = "ESTABLISHED",
+	[MPTCP_EVENT_CLOSED] = "CLOSED",
+	[MPTCP_EVENT_ANNOUNCED] = "ANNOUNCED",
+	[MPTCP_EVENT_REMOVED] = "REMOVED",
+	[MPTCP_EVENT_SUB_ESTABLISHED] = "SF_ESTABLISHED",
+	[MPTCP_EVENT_SUB_CLOSED] = "SF_CLOSED",
+	[MPTCP_EVENT_SUB_PRIORITY] = "SF_PRIO",
+	[MPTCP_EVENT_LISTENER_CREATED] = "LISTENER_CREATED",
+	[MPTCP_EVENT_LISTENER_CLOSED] = "LISTENER_CLOSED",
+};
+
+static void print_addr(const char *key, int af, struct rtattr *value)
+{
+	void *data = RTA_DATA(value);
+	char str[INET6_ADDRSTRLEN];
+
+	if (inet_ntop(af, data, str, sizeof(str)))
+		printf(" %s=%s", key, str);
+}
+
+static int mptcp_monitor_msg(struct rtnl_ctrl_data *ctrl,
+			     struct nlmsghdr *n, void *arg)
+{
+	const struct genlmsghdr *ghdr = NLMSG_DATA(n);
+	struct rtattr *tb[MPTCP_ATTR_MAX + 1];
+	int len = n->nlmsg_len;
+
+	len -= NLMSG_LENGTH(GENL_HDRLEN);
+	if (len < 0)
+		return -1;
+
+	if (n->nlmsg_type != genl_family)
+		return 0;
+
+	if (timestamp)
+		print_timestamp(stdout);
+
+	if (ghdr->cmd >= ARRAY_SIZE(event_to_str)) {
+		printf("[UNKNOWN %u]\n", ghdr->cmd);
+		goto out;
+	}
+
+	if (event_to_str[ghdr->cmd] == NULL) {
+		printf("[UNKNOWN %u]\n", ghdr->cmd);
+		goto out;
+	}
+
+	printf("[%16s]", event_to_str[ghdr->cmd]);
+
+	parse_rtattr(tb, MPTCP_ATTR_MAX, (void *) ghdr + GENL_HDRLEN, len);
+
+	if (tb[MPTCP_ATTR_TOKEN])
+		printf(" token=%08x", rta_getattr_u32(tb[MPTCP_ATTR_TOKEN]));
+
+	if (tb[MPTCP_ATTR_REM_ID])
+		printf(" remid=%u", rta_getattr_u8(tb[MPTCP_ATTR_REM_ID]));
+	if (tb[MPTCP_ATTR_LOC_ID])
+		printf(" locid=%u", rta_getattr_u8(tb[MPTCP_ATTR_LOC_ID]));
+
+	if (tb[MPTCP_ATTR_SADDR4])
+		print_addr("saddr4", AF_INET, tb[MPTCP_ATTR_SADDR4]);
+	if (tb[MPTCP_ATTR_DADDR4])
+		print_addr("daddr4", AF_INET, tb[MPTCP_ATTR_DADDR4]);
+	if (tb[MPTCP_ATTR_SADDR6])
+		print_addr("saddr6", AF_INET6, tb[MPTCP_ATTR_SADDR6]);
+	if (tb[MPTCP_ATTR_DADDR6])
+		print_addr("daddr6", AF_INET6, tb[MPTCP_ATTR_DADDR6]);
+	if (tb[MPTCP_ATTR_SPORT])
+		printf(" sport=%u", rta_getattr_be16(tb[MPTCP_ATTR_SPORT]));
+	if (tb[MPTCP_ATTR_DPORT])
+		printf(" dport=%u", rta_getattr_be16(tb[MPTCP_ATTR_DPORT]));
+	if (tb[MPTCP_ATTR_BACKUP])
+		printf(" backup=%d", rta_getattr_u8(tb[MPTCP_ATTR_BACKUP]));
+	if (tb[MPTCP_ATTR_ERROR])
+		printf(" error=%d", rta_getattr_u8(tb[MPTCP_ATTR_ERROR]));
+	if (tb[MPTCP_ATTR_FLAGS])
+		printf(" flags=%x", rta_getattr_u16(tb[MPTCP_ATTR_FLAGS]));
+	if (tb[MPTCP_ATTR_TIMEOUT])
+		printf(" timeout=%u", rta_getattr_u32(tb[MPTCP_ATTR_TIMEOUT]));
+	if (tb[MPTCP_ATTR_IF_IDX])
+		printf(" ifindex=%d", rta_getattr_s32(tb[MPTCP_ATTR_IF_IDX]));
+	if (tb[MPTCP_ATTR_RESET_REASON])
+		printf(" reset_reason=%u", rta_getattr_u32(tb[MPTCP_ATTR_RESET_REASON]));
+	if (tb[MPTCP_ATTR_RESET_FLAGS])
+		printf(" reset_flags=0x%x", rta_getattr_u32(tb[MPTCP_ATTR_RESET_FLAGS]));
+
+	puts("");
+out:
+	fflush(stdout);
+	return 0;
+}
+
+static int mptcp_monitor(void)
+{
+	if (genl_add_mcast_grp(&genl_rth, genl_family, MPTCP_PM_EV_GRP_NAME) < 0) {
+		perror("can't subscribe to mptcp events");
+		return 1;
+	}
+
+	if (rtnl_listen(&genl_rth, mptcp_monitor_msg, stdout) < 0)
+		return 2;
+
 	return 0;
 }
 
@@ -404,6 +571,9 @@ int do_mptcp(int argc, char **argv)
 		if (matches(*argv, "add") == 0)
 			return mptcp_addr_modify(argc-1, argv+1,
 						 MPTCP_PM_CMD_ADD_ADDR);
+		if (matches(*argv, "change") == 0)
+			return mptcp_addr_modify(argc-1, argv+1,
+						 MPTCP_PM_CMD_SET_FLAGS);
 		if (matches(*argv, "delete") == 0)
 			return mptcp_addr_modify(argc-1, argv+1,
 						 MPTCP_PM_CMD_DEL_ADDR);
@@ -427,6 +597,14 @@ int do_mptcp(int argc, char **argv)
 		if (matches(*argv, "show") == 0)
 			return mptcp_limit_get_set(argc-1, argv+1,
 						   MPTCP_PM_CMD_GET_LIMITS);
+	}
+
+	if (matches(*argv, "monitor") == 0) {
+		NEXT_ARG_FWD();
+		if (argc == 0)
+			return mptcp_monitor();
+
+		goto unknown;
 	}
 
 unknown:

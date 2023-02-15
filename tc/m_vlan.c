@@ -1,10 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * m_vlan.c		vlan manipulation module
- *
- *              This program is free software; you can redistribute it and/or
- *              modify it under the terms of the GNU General Public License
- *              as published by the Free Software Foundation; either version
- *              2 of the License, or (at your option) any later version.
  *
  * Authors:     Jiri Pirko <jiri@resnulli.us>
  */
@@ -279,8 +275,8 @@ static int print_vlan(struct action_util *au, FILE *f, struct rtattr *arg)
 				    ETH_ALEN, 0, b1, sizeof(b1));
 			print_string(PRINT_ANY, "dst_mac", " dst_mac %s", b1);
 		}
-		if (tb[TCA_VLAN_PUSH_ETH_SRC &&
-		       RTA_PAYLOAD(tb[TCA_VLAN_PUSH_ETH_SRC]) == ETH_ALEN]) {
+		if (tb[TCA_VLAN_PUSH_ETH_SRC] &&
+		       RTA_PAYLOAD(tb[TCA_VLAN_PUSH_ETH_SRC]) == ETH_ALEN) {
 			ll_addr_n2a(RTA_DATA(tb[TCA_VLAN_PUSH_ETH_SRC]),
 				    ETH_ALEN, 0, b1, sizeof(b1));
 			print_string(PRINT_ANY, "src_mac", " src_mac %s", b1);

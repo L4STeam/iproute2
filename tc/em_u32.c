@@ -1,10 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * em_u32.c		U32 Ematch
- *
- *		This program is free software; you can distribute it and/or
- *		modify it under the terms of the GNU General Public License
- *		as published by the Free Software Foundation; either version
- *		2 of the License, or (at your option) any later version.
  *
  * Authors:	Thomas Graf <tgraf@suug.ch>
  */
@@ -84,7 +80,7 @@ static int u32_parse_eopt(struct nlmsghdr *n, struct tcf_ematch_hdr *hdr,
 		char buf[a->len - nh_len + 1];
 
 		offmask = -1;
-		memcpy(buf, a->data + nh_len, a->len - nh_len);
+		strncpy(buf, a->data + nh_len, a->len - nh_len + 1);
 		offset = strtoul(buf, NULL, 0);
 	} else if (!bstrcmp(a, "nexthdr+")) {
 		a = bstr_next(a);

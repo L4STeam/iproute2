@@ -1,13 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * m_skbmod.c	skb modifier action module
  *
- *		This program is free software; you can distribute it and/or
- *		modify it under the terms of the GNU General Public License
- *		as published by the Free Software Foundation; either version
- *		2 of the License, or (at your option) any later version.
- *
  * Authors:  J Hadi Salim (jhs@mojatatu.com)
- *
  */
 
 #include <stdio.h>
@@ -28,10 +23,9 @@
 static void skbmod_explain(void)
 {
 	fprintf(stderr,
-		"Usage:... skbmod {[set <SETTABLE>] [swap <SWAPABLE>]} [CONTROL] [index INDEX]\n"
+		"Usage:... skbmod { set <SETTABLE> | swap <SWAPPABLE> | ecn } [CONTROL] [index INDEX]\n"
 		"where SETTABLE is: [dmac DMAC] [smac SMAC] [etype ETYPE]\n"
-		"where SWAPABLE is: \"mac\" to swap mac addresses\n"
-		"note: \"swap mac\" is done after any outstanding D/SMAC change\n"
+		"where SWAPPABLE is: \"mac\" to swap mac addresses\n"
 		"\tDMAC := 6 byte Destination MAC address\n"
 		"\tSMAC := optional 6 byte Source MAC address\n"
 		"\tETYPE := optional 16 bit ethertype\n"
@@ -111,6 +105,9 @@ static int parse_skbmod(struct action_util *a, int *argc_p, char ***argv_p,
 			}
 			p.flags |= SKBMOD_F_SMAC;
 			fprintf(stderr, "src MAC address <%s>\n", saddr);
+			ok += 1;
+		} else if (matches(*argv, "ecn") == 0) {
+			p.flags |= SKBMOD_F_ECN;
 			ok += 1;
 		} else if (matches(*argv, "help") == 0) {
 			skbmod_usage();
@@ -211,6 +208,9 @@ static int print_skbmod(struct action_util *au, FILE *f, struct rtattr *arg)
 
 	if (p->flags & SKBMOD_F_SWAPMAC)
 		fprintf(f, "swap mac ");
+
+	if (p->flags & SKBMOD_F_ECN)
+		fprintf(f, "ecn ");
 
 	fprintf(f, "\n\t index %u ref %d bind %d", p->index, p->refcnt,
 		p->bindcnt);

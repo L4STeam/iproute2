@@ -1,13 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * iptunnel.c	       "ip tuntap"
  *
- *		This program is free software; you can redistribute it and/or
- *		modify it under the terms of the GNU General Public License
- *		as published by the Free Software Foundation; either version
- *		2 of the License, or (at your option) any later version.
- *
  * Authors:	David Woodhouse <David.Woodhouse@intel.com>
- *
  */
 
 #include <stdio.h>
@@ -42,11 +37,11 @@ static void usage(void)
 {
 	fprintf(stderr,
 		"Usage: ip tuntap { add | del | show | list | lst | help } [ dev PHYS_DEV ]\n"
-		"	[ mode { tun | tap } ] [ user USER ] [ group GROUP ]\n"
-		"	[ one_queue ] [ pi ] [ vnet_hdr ] [ multi_queue ] [ name NAME ]\n"
+		"       [ mode { tun | tap } ] [ user USER ] [ group GROUP ]\n"
+		"       [ one_queue ] [ pi ] [ vnet_hdr ] [ multi_queue ] [ name NAME ]\n"
 		"\n"
-		"Where:	USER  := { STRING | NUMBER }\n"
-		"	GROUP := { STRING | NUMBER }\n");
+		"Where: USER  := { STRING | NUMBER }\n"
+		"       GROUP := { STRING | NUMBER }\n");
 	exit(-1);
 }
 
@@ -243,6 +238,9 @@ static void print_flags(long flags)
 	if (flags & IFF_ONE_QUEUE)
 		print_string(PRINT_ANY, NULL, " %s", "one_queue");
 
+	if (flags & IFF_MULTI_QUEUE)
+		print_string(PRINT_ANY, NULL, " %s", "multi_queue");
+
 	if (flags & IFF_VNET_HDR)
 		print_string(PRINT_ANY, NULL, " %s", "vnet_hdr");
 
@@ -253,40 +251,12 @@ static void print_flags(long flags)
 		print_string(PRINT_ANY, NULL, " %s", "filter");
 
 	flags &= ~(IFF_TUN | IFF_TAP | IFF_NO_PI | IFF_ONE_QUEUE |
-		   IFF_VNET_HDR | IFF_PERSIST | IFF_NOFILTER);
+		   IFF_MULTI_QUEUE | IFF_VNET_HDR | IFF_PERSIST |
+		   IFF_NOFILTER);
 	if (flags)
-		print_0xhex(PRINT_ANY, NULL, "%#llx", flags);
+		print_0xhex(PRINT_ANY, NULL, " %#llx", flags);
 
 	close_json_array(PRINT_JSON, NULL);
-}
-
-static char *pid_name(pid_t pid)
-{
-	char *comm;
-	FILE *f;
-	int err;
-
-	err = asprintf(&comm, "/proc/%d/comm", pid);
-	if (err < 0)
-		return NULL;
-
-	f = fopen(comm, "r");
-	free(comm);
-	if (!f) {
-		perror("fopen");
-		return NULL;
-	}
-
-	if (fscanf(f, "%ms\n", &comm) != 1) {
-		perror("fscanf");
-		comm = NULL;
-	}
-
-
-	if (fclose(f))
-		perror("fclose");
-
-	return comm;
 }
 
 static void show_processes(const char *name)
@@ -346,14 +316,16 @@ static void show_processes(const char *name)
 			} else if (err == 2 &&
 				   !strcmp("iff", key) &&
 				   !strcmp(name, value)) {
-				char *pname = pid_name(pid);
+				SPRINT_BUF(pname);
 
-				print_string(PRINT_ANY, "name",
-					     "%s", pname ? : "<NULL>");
+				if (get_task_name(pid, pname, sizeof(pname)))
+					print_string(PRINT_ANY, "name",
+						     "%s", "<NULL>");
+				else
+					print_string(PRINT_ANY, "name",
+						     "%s", pname);
 
-				print_uint(PRINT_ANY, "pid",
-					   "(%d)", pid);
-				free(pname);
+				print_uint(PRINT_ANY, "pid", "(%d)", pid);
 			}
 
 			free(key);

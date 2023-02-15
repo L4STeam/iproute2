@@ -1,25 +1,9 @@
-/* $USAGI: $ */
-
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright (C)2005 USAGI/WIDE Project
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, see <http://www.gnu.org/licenses>.
- */
-/*
  * based on ipmonitor.c
- */
-/*
+ *
  * Authors:
  *	Masahide NAKAMURA @USAGI
  */
@@ -199,7 +183,7 @@ static int xfrm_report_print(struct nlmsghdr *n, void *arg)
 
 	parse_rtattr(tb, XFRMA_MAX, XFRMREP_RTA(xrep), len);
 
-	xfrm_xfrma_print(tb, family, fp, "  ", nokeys);
+	xfrm_xfrma_print(tb, family, fp, "  ", nokeys, true);
 
 	if (oneline)
 		fprintf(fp, "\n");
@@ -322,6 +306,9 @@ static int xfrm_accept_msg(struct rtnl_ctrl_data *ctrl,
 		return 0;
 	case XFRM_MSG_MAPPING:
 		xfrm_mapping_print(n, arg);
+		return 0;
+	case XFRM_MSG_GETDEFAULT:
+		xfrm_policy_default_print(n, arg);
 		return 0;
 	default:
 		break;

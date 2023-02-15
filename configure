@@ -1,13 +1,10 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-2.0
 # This is not an autoconf generated configure
-#
-# Influential LIBBPF environment variables:
-#   LIBBPF_FORCE={on,off}   on: require link against libbpf;
-#                           off: disable libbpf probing
-#   LIBBPF_DIR              Path to libbpf DESTDIR to use
 
-INCLUDE=${1:-"$PWD/include"}
+INCLUDE="$PWD/include"
+PREFIX="/usr"
+LIBDIR="\${prefix}/lib"
 
 # Output file which is input to Makefile
 CONFIG=config.mk
@@ -153,6 +150,15 @@ EOF
 	rm -f $TMPDIR/ipttest.c $TMPDIR/ipttest
 }
 
+check_lib_dir()
+{
+	LIBDIR=$(echo $LIBDIR | sed "s|\${prefix}|$PREFIX|")
+
+	echo -n "lib directory: "
+	echo "$LIBDIR"
+	echo "LIBDIR:=$LIBDIR" >> $CONFIG
+}
+
 check_ipt()
 {
 	if ! grep TC_CONFIG_XT $CONFIG > /dev/null; then
@@ -185,6 +191,7 @@ check_ipt_lib_dir()
 check_setns()
 {
     cat >$TMPDIR/setnstest.c <<EOF
+#define _GNU_SOURCE
 #include <sched.h>
 int main(int argc, char **argv)
 {
@@ -200,6 +207,30 @@ EOF
 	echo "no"
     fi
     rm -f $TMPDIR/setnstest.c $TMPDIR/setnstest
+}
+
+check_name_to_handle_at()
+{
+    cat >$TMPDIR/name_to_handle_at_test.c <<EOF
+#define _GNU_SOURCE
+#include <sys/types.h>
+#include <fcntl.h>
+int main(int argc, char **argv)
+{
+	struct file_handle *fhp;
+	int mount_id, flags, dirfd;
+	char *pathname;
+	name_to_handle_at(dirfd, pathname, fhp, &mount_id, flags);
+	return 0;
+}
+EOF
+    if $CC -I$INCLUDE -o $TMPDIR/name_to_handle_at_test $TMPDIR/name_to_handle_at_test.c >/dev/null 2>&1; then
+        echo "yes"
+        echo "CFLAGS += -DHAVE_HANDLE_AT" >>$CONFIG
+    else
+        echo "no"
+    fi
+    rm -f $TMPDIR/name_to_handle_at_test.c $TMPDIR/name_to_handle_at_test
 }
 
 check_ipset()
@@ -364,6 +395,19 @@ check_selinux()
 	fi
 }
 
+check_tirpc()
+{
+	if ${PKG_CONFIG} libtirpc --exists; then
+		echo "HAVE_RPC:=y" >>$CONFIG
+		echo "yes"
+
+		echo 'LDLIBS +=' `${PKG_CONFIG} --libs libtirpc` >>$CONFIG
+		echo 'CFLAGS += -DHAVE_RPC' `${PKG_CONFIG} --cflags libtirpc` >>$CONFIG
+	else
+		echo "no"
+	fi
+}
+
 check_mnl()
 {
 	if ${PKG_CONFIG} libmnl --exists; then
@@ -461,6 +505,76 @@ endif
 EOF
 }
 
+usage()
+{
+	cat <<EOF
+Usage: $0 [OPTIONS]
+	--include_dir <dir>		Path to iproute2 include dir
+	--libdir <dir>			Path to iproute2 lib dir
+	--libbpf_dir <dir>		Path to libbpf DESTDIR
+	--libbpf_force <on|off>		Enable/disable libbpf by force. Available options:
+					  on: require link against libbpf, quit config if no libbpf support
+					  off: disable libbpf probing
+	--prefix <dir>			Path prefix of the lib files to install
+	-h | --help			Show this usage info
+EOF
+	exit $1
+}
+
+# Compat with the old INCLUDE path setting method.
+if [ $# -eq 1 ] && [ "$(echo $1 | cut -c 1)" != '-' ]; then
+	INCLUDE="$1"
+else
+	while [ "$#" -gt 0 ]; do
+		case "$1" in
+			--include_dir)
+				shift
+				INCLUDE="$1" ;;
+			--include_dir=*)
+				INCLUDE="${1#*=}" ;;
+			--libdir)
+				shift
+				LIBDIR="$1" ;;
+			--libdir=*)
+				LIBDIR="${1#*=}" ;;
+			--libbpf_dir)
+				shift
+				LIBBPF_DIR="$1" ;;
+			--libbpf_dir=*)
+				LIBBPF_DIR="${1#*=}" ;;
+			--libbpf_force)
+				shift
+				LIBBPF_FORCE="$1" ;;
+			--libbpf_force=*)
+				LIBBPF_FORCE="${1#*=}" ;;
+			--prefix)
+				shift
+				PREFIX="$1" ;;
+			--prefix=*)
+				PREFIX="${1#*=}" ;;
+			-h | --help)
+				usage 0 ;;
+			--*)
+				;;
+			*)
+				usage 1 ;;
+		esac
+		[ "$#" -gt 0 ] && shift
+	done
+fi
+
+[ -d "$INCLUDE" ] || usage 1
+if [ "${LIBBPF_DIR-unused}" != "unused" ]; then
+	[ -d "$LIBBPF_DIR" ] || usage 1
+fi
+if [ "${LIBBPF_FORCE-unused}" != "unused" ]; then
+	if [ "$LIBBPF_FORCE" != 'on' ] && [ "$LIBBPF_FORCE" != 'off' ]; then
+		usage 1
+	fi
+fi
+[ -z "$PREFIX" ] && usage 1
+[ -z "$LIBDIR" ] && usage 1
+
 echo "# Generated config based on" $INCLUDE >$CONFIG
 quiet_config >> $CONFIG
 
@@ -484,6 +598,7 @@ if ! grep -q TC_CONFIG_NO_XT $CONFIG; then
 fi
 
 echo
+check_lib_dir
 if ! grep -q TC_CONFIG_NO_XT $CONFIG; then
 	echo -n "iptables modules directory: "
 	check_ipt_lib_dir
@@ -492,8 +607,14 @@ fi
 echo -n "libc has setns: "
 check_setns
 
+echo -n "libc has name_to_handle_at: "
+check_name_to_handle_at
+
 echo -n "SELinux support: "
 check_selinux
+
+echo -n "libtirpc support: "
+check_tirpc
 
 echo -n "libbpf support: "
 check_libbpf

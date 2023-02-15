@@ -1,10 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * iplink_bridge_slave.c	Bridge slave device support
- *
- *              This program is free software; you can redistribute it and/or
- *              modify it under the terms of the GNU General Public License
- *              as published by the Free Software Foundation; either version
- *              2 of the License, or (at your option) any later version.
  *
  * Authors:     Jiri Pirko <jiri@resnulli.us>
  */
@@ -37,11 +33,14 @@ static void print_explain(FILE *f)
 		"			[ mcast_router MULTICAST_ROUTER ]\n"
 		"			[ mcast_fast_leave {on | off} ]\n"
 		"			[ mcast_flood {on | off} ]\n"
+		"			[ bcast_flood {on | off} ]\n"
 		"			[ mcast_to_unicast {on | off} ]\n"
 		"			[ group_fwd_mask MASK ]\n"
 		"			[ neigh_suppress {on | off} ]\n"
 		"			[ vlan_tunnel {on | off} ]\n"
 		"			[ isolated {on | off} ]\n"
+		"			[ locked {on | off} ]\n"
+		"                       [ mab {on | off} ]\n"
 		"			[ backup_port DEVICE ] [ nobackup_port ]\n"
 	);
 }
@@ -250,6 +249,10 @@ static void bridge_slave_print_opt(struct link_util *lu, FILE *f,
 		print_on_off(PRINT_ANY, "mcast_flood", "mcast_flood %s ",
 			     rta_getattr_u8(tb[IFLA_BRPORT_MCAST_FLOOD]));
 
+	if (tb[IFLA_BRPORT_BCAST_FLOOD])
+		print_on_off(PRINT_ANY, "bcast_flood", "bcast_flood %s ",
+			     rta_getattr_u8(tb[IFLA_BRPORT_BCAST_FLOOD]));
+
 	if (tb[IFLA_BRPORT_MCAST_TO_UCAST])
 		print_on_off(PRINT_ANY, "mcast_to_unicast", "mcast_to_unicast %s ",
 			     rta_getattr_u8(tb[IFLA_BRPORT_MCAST_TO_UCAST]));
@@ -277,6 +280,14 @@ static void bridge_slave_print_opt(struct link_util *lu, FILE *f,
 	if (tb[IFLA_BRPORT_ISOLATED])
 		print_on_off(PRINT_ANY, "isolated", "isolated %s ",
 			     rta_getattr_u8(tb[IFLA_BRPORT_ISOLATED]));
+
+	if (tb[IFLA_BRPORT_LOCKED])
+		print_on_off(PRINT_ANY, "locked", "locked %s ",
+			     rta_getattr_u8(tb[IFLA_BRPORT_LOCKED]));
+
+	if (tb[IFLA_BRPORT_MAB])
+		print_on_off(PRINT_ANY, "mab", "mab %s ",
+			     rta_getattr_u8(tb[IFLA_BRPORT_MAB]));
 
 	if (tb[IFLA_BRPORT_BACKUP_PORT]) {
 		int backup_p = rta_getattr_u32(tb[IFLA_BRPORT_BACKUP_PORT]);
@@ -350,6 +361,10 @@ static int bridge_slave_parse_opt(struct link_util *lu, int argc, char **argv,
 			NEXT_ARG();
 			bridge_slave_parse_on_off("mcast_flood", *argv, n,
 						  IFLA_BRPORT_MCAST_FLOOD);
+		} else if (matches(*argv, "bcast_flood") == 0) {
+			NEXT_ARG();
+			bridge_slave_parse_on_off("bcast_flood", *argv, n,
+						  IFLA_BRPORT_BCAST_FLOOD);
 		} else if (matches(*argv, "mcast_to_unicast") == 0) {
 			NEXT_ARG();
 			bridge_slave_parse_on_off("mcast_to_unicast", *argv, n,
@@ -393,6 +408,14 @@ static int bridge_slave_parse_opt(struct link_util *lu, int argc, char **argv,
 			NEXT_ARG();
 			bridge_slave_parse_on_off("isolated", *argv, n,
 						  IFLA_BRPORT_ISOLATED);
+		} else if (matches(*argv, "locked") == 0) {
+			NEXT_ARG();
+			bridge_slave_parse_on_off("locked", *argv, n,
+						  IFLA_BRPORT_LOCKED);
+		} else if (strcmp(*argv, "mab") == 0) {
+			NEXT_ARG();
+			bridge_slave_parse_on_off("mab", *argv, n,
+						  IFLA_BRPORT_MAB);
 		} else if (matches(*argv, "backup_port") == 0) {
 			int ifindex;
 

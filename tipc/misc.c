@@ -1,10 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * misc.c	Miscellaneous TIPC helper functions.
- *
- *		This program is free software; you can redistribute it and/or
- *		modify it under the terms of the GNU General Public License
- *		as published by the Free Software Foundation; either version
- *		2 of the License, or (at your option) any later version.
  *
  * Authors:	Richard Alpe <richard.alpe@ericsson.com>
  */
@@ -113,13 +109,15 @@ int str2key(char *str, struct tipc_aead_key *key)
 	    }
 	}
 
+	key->keylen = ishex ? (len + 1) / 2 : len;
+	if (key->keylen > TIPC_AEAD_KEYLEN_MAX)
+		return -1;
+
 	/* Obtain key: */
 	if (!ishex) {
-		key->keylen = len;
 		memcpy(key->key, str, len);
 	} else {
 		/* Convert hex string to key */
-		key->keylen = (len + 1) / 2;
 		for (i = 0; i < key->keylen; i++) {
 			if (i == 0 && len % 2 != 0) {
 				if (sscanf(str, "%1hhx", &key->key[0]) != 1)

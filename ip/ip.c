@@ -1,10 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * ip.c		"ip" utility frontend.
- *
- *		This program is free software; you can redistribute it and/or
- *		modify it under the terms of the GNU General Public License
- *		as published by the Free Software Foundation; either version
- *		2 of the License, or (at your option) any later version.
  *
  * Authors:	Alexey Kuznetsov, <kuznet@ms2.inr.ac.ru>
  */
@@ -39,6 +35,7 @@ int oneline;
 int brief;
 int json;
 int timestamp;
+int echo_request;
 int force;
 int max_flush_loops = 10;
 int batch_mode;
@@ -64,15 +61,15 @@ static void usage(void)
 	fprintf(stderr,
 		"Usage: ip [ OPTIONS ] OBJECT { COMMAND | help }\n"
 		"       ip [ -force ] -batch filename\n"
-		"where  OBJECT := { address | addrlabel | fou | help | ila | l2tp | link |\n"
-		"                   macsec | maddress | monitor | mptcp | mroute | mrule |\n"
+		"where  OBJECT := { address | addrlabel | amt | fou | help | ila | ioam | l2tp |\n"
+		"                   link | macsec | maddress | monitor | mptcp | mroute | mrule |\n"
 		"                   neighbor | neighbour | netconf | netns | nexthop | ntable |\n"
 		"                   ntbl | route | rule | sr | tap | tcpmetrics |\n"
 		"                   token | tunnel | tuntap | vrf | xfrm }\n"
 		"       OPTIONS := { -V[ersion] | -s[tatistics] | -d[etails] | -r[esolve] |\n"
 		"                    -h[uman-readable] | -iec | -j[son] | -p[retty] |\n"
 		"                    -f[amily] { inet | inet6 | mpls | bridge | link } |\n"
-		"                    -4 | -6 | -I | -D | -M | -B | -0 |\n"
+		"                    -4 | -6 | -M | -B | -0 |\n"
 		"                    -l[oops] { maximum-addr-flush-attempts } | -br[ief] |\n"
 		"                    -o[neline] | -t[imestamp] | -ts[hort] | -b[atch] [filename] |\n"
 		"                    -rc[vbuf] [size] | -n[etns] name | -N[umeric] | -a[ll] |\n"
@@ -121,11 +118,13 @@ static const struct cmd {
 	{ "sr",		do_seg6 },
 	{ "nexthop",	do_ipnh },
 	{ "mptcp",	do_mptcp },
+	{ "ioam",	do_ioam6 },
 	{ "help",	do_help },
+	{ "stats",	do_ipstats },
 	{ 0 }
 };
 
-static int do_cmd(const char *argv0, int argc, char **argv)
+static int do_cmd(const char *argv0, int argc, char **argv, bool final)
 {
 	const struct cmd *c;
 
@@ -134,7 +133,8 @@ static int do_cmd(const char *argv0, int argc, char **argv)
 			return -(c->func(argc-1, argv+1));
 	}
 
-	fprintf(stderr, "Object \"%s\" is unknown, try \"ip help\".\n", argv0);
+	if (final)
+		fprintf(stderr, "Object \"%s\" is unknown, try \"ip help\".\n", argv0);
 	return EXIT_FAILURE;
 }
 
@@ -143,7 +143,7 @@ static int ip_batch_cmd(int argc, char *argv[], void *data)
 	const int *orig_family = data;
 
 	preferred_family = *orig_family;
-	return do_cmd(argv[0], argc, argv);
+	return do_cmd(argv[0], argc, argv, true);
 }
 
 static int batch(const char *name)
@@ -222,8 +222,6 @@ int main(int argc, char **argv)
 			preferred_family = AF_INET6;
 		} else if (strcmp(opt, "-0") == 0) {
 			preferred_family = AF_PACKET;
-		} else if (strcmp(opt, "-D") == 0) {
-			preferred_family = AF_DECnet;
 		} else if (strcmp(opt, "-M") == 0) {
 			preferred_family = AF_MPLS;
 		} else if (strcmp(opt, "-B") == 0) {
@@ -292,6 +290,8 @@ int main(int argc, char **argv)
 			++numeric;
 		} else if (matches(opt, "-all") == 0) {
 			do_all = true;
+		} else if (strcmp(opt, "-echo") == 0) {
+			++echo_request;
 		} else {
 			fprintf(stderr,
 				"Option \"%s\" is unknown, try \"ip -help\".\n",
@@ -313,11 +313,14 @@ int main(int argc, char **argv)
 
 	rtnl_set_strict_dump(&rth);
 
-	if (strlen(basename) > 2)
-		return do_cmd(basename+2, argc, argv);
+	if (strlen(basename) > 2) {
+		int ret = do_cmd(basename+2, argc, argv, false);
+		if (ret != EXIT_FAILURE)
+			return ret;
+	}
 
 	if (argc > 1)
-		return do_cmd(argv[1], argc-1, argv+1);
+		return do_cmd(argv[1], argc-1, argv+1, true);
 
 	rtnl_close(&rth);
 	usage();

@@ -1,13 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * ipl2tp.c	       "ip l2tp"
  *
- *		This program is free software; you can redistribute it and/or
- *		modify it under the terms of the GNU General Public License
- *		as published by the Free Software Foundation; either version
- *		2 of the License, or (at your option) any later version.
- *
  * Original Author:	James Chapman <jchapman@katalix.com>
- *
  */
 
 #include <stdio.h>
@@ -191,8 +186,9 @@ static int delete_session(struct l2tp_parm *p)
 	return 0;
 }
 
-static void print_cookie(const char *name, const char *fmt,
-			 const uint8_t *cookie, int len)
+static void __attribute__((format(printf, 2, 0)))
+print_cookie(const char *name, const char *fmt,
+	     const uint8_t *cookie, int len)
 {
 	char abuf[32];
 	size_t n;
@@ -257,7 +253,7 @@ static void print_tunnel(const struct l2tp_data *data)
 					   NULL, p->udp6_csum_tx);
 
 				print_bool(PRINT_JSON, "checksum_rx",
-					   NULL, p->udp6_csum_tx);
+					   NULL, p->udp6_csum_rx);
 			} else {
 				printf("  UDP checksum: %s%s%s%s\n",
 				       p->udp6_csum_tx && p->udp6_csum_rx

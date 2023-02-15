@@ -1,13 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * ipneigh.c		"ip neigh".
  *
- *		This program is free software; you can redistribute it and/or
- *		modify it under the terms of the GNU General Public License
- *		as published by the Free Software Foundation; either version
- *		2 of the License, or (at your option) any later version.
- *
  * Authors:	Alexey Kuznetsov, <kuznet@ms2.inr.ac.ru>
- *
  */
 
 #include <stdio.h>
@@ -50,11 +45,12 @@ static void usage(void)
 {
 	fprintf(stderr,
 		"Usage: ip neigh { add | del | change | replace }\n"
-		"		{ ADDR [ lladdr LLADDR ] [ nud STATE ] proxy ADDR }\n"
-		"		[ dev DEV ] [ router ] [ extern_learn ] [ protocol PROTO ]\n"
+		"                { ADDR [ lladdr LLADDR ] [ nud STATE ] proxy ADDR }\n"
+		"                [ dev DEV ] [ router ] [ use ] [ managed ] [ extern_learn ]\n"
+		"                [ protocol PROTO ]\n"
 		"\n"
 		"	ip neigh { show | flush } [ proxy ] [ to PREFIX ] [ dev DEV ] [ nud STATE ]\n"
-		"				  [ vrf NAME ]\n"
+		"				  [ vrf NAME ] [ nomaster ]\n"
 		"	ip neigh get { ADDR | proxy ADDR } dev DEV\n"
 		"\n"
 		"STATE := { delay | failed | incomplete | noarp | none |\n"
@@ -115,6 +111,7 @@ static int ipneigh_modify(int cmd, int flags, int argc, char **argv)
 		.ndm.ndm_family = preferred_family,
 		.ndm.ndm_state = NUD_PERMANENT,
 	};
+	__u32 ext_flags = 0;
 	char  *dev = NULL;
 	int dst_ok = 0;
 	int dev_ok = 0;
@@ -148,6 +145,11 @@ static int ipneigh_modify(int cmd, int flags, int argc, char **argv)
 			req.ndm.ndm_flags |= NTF_PROXY;
 		} else if (strcmp(*argv, "router") == 0) {
 			req.ndm.ndm_flags |= NTF_ROUTER;
+		} else if (strcmp(*argv, "use") == 0) {
+			req.ndm.ndm_flags |= NTF_USE;
+		} else if (strcmp(*argv, "managed") == 0) {
+			ext_flags |= NTF_EXT_MANAGED;
+			req.ndm.ndm_state = NUD_NONE;
 		} else if (matches(*argv, "extern_learn") == 0) {
 			req.ndm.ndm_flags |= NTF_EXT_LEARNED;
 		} else if (strcmp(*argv, "dev") == 0) {
@@ -183,7 +185,10 @@ static int ipneigh_modify(int cmd, int flags, int argc, char **argv)
 	req.ndm.ndm_family = dst.family;
 	if (addattr_l(&req.n, sizeof(req), NDA_DST, &dst.data, dst.bytelen) < 0)
 		return -1;
-
+	if (ext_flags &&
+	    addattr_l(&req.n, sizeof(req), NDA_FLAGS_EXT, &ext_flags,
+		      sizeof(ext_flags)) < 0)
+		return -1;
 	if (lla && strcmp(lla, "null")) {
 		char llabuf[20];
 		int l;
@@ -235,7 +240,7 @@ static void print_neigh_state(unsigned int nud)
 #define PRINT_FLAG(f)						\
 	if (nud & NUD_##f) {					\
 		nud &= ~NUD_##f;				\
-		print_string(PRINT_ANY, NULL, " %s", #f);	\
+		print_string(PRINT_ANY, NULL, "%s ", #f);	\
 	}
 
 	PRINT_FLAG(INCOMPLETE);
@@ -251,6 +256,51 @@ static void print_neigh_state(unsigned int nud)
 	close_json_array(PRINT_JSON, NULL);
 }
 
+static int print_neigh_brief(FILE *fp, struct ndmsg *r, struct rtattr *tb[])
+{
+	if (tb[NDA_DST]) {
+		const char *dst;
+		int family = r->ndm_family;
+
+		if (family == AF_BRIDGE) {
+			if (RTA_PAYLOAD(tb[NDA_DST]) == sizeof(struct in6_addr))
+				family = AF_INET6;
+			else
+				family = AF_INET;
+		}
+
+		dst = format_host_rta(family, tb[NDA_DST]);
+		print_color_string(PRINT_ANY, ifa_family_color(family),
+				   "dst", "%-39s ", dst);
+	}
+
+	if (!filter.index && r->ndm_ifindex) {
+		print_color_string(PRINT_ANY, COLOR_IFNAME,
+				   "dev", "%-16s ",
+				   ll_index_to_name(r->ndm_ifindex));
+	}
+
+	if (tb[NDA_LLADDR]) {
+		const char *lladdr;
+
+		SPRINT_BUF(b1);
+
+		lladdr = ll_addr_n2a(RTA_DATA(tb[NDA_LLADDR]),
+				     RTA_PAYLOAD(tb[NDA_LLADDR]),
+				     ll_index_to_type(r->ndm_ifindex),
+				     b1, sizeof(b1));
+
+		print_color_string(PRINT_ANY, COLOR_MAC,
+				   "lladdr", "%s", lladdr);
+	}
+
+	print_string(PRINT_FP, NULL, "%s", "\n");
+	close_json_object();
+	fflush(fp);
+
+	return 0;
+}
+
 int print_neigh(struct nlmsghdr *n, void *arg)
 {
 	FILE *fp = (FILE *)arg;
@@ -258,6 +308,7 @@ int print_neigh(struct nlmsghdr *n, void *arg)
 	int len = n->nlmsg_len;
 	struct rtattr *tb[NDA_MAX+1];
 	static int logit = 1;
+	__u32 ext_flags = 0;
 	__u8 protocol = 0;
 
 	if (n->nlmsg_type != RTM_NEWNEIGH && n->nlmsg_type != RTM_DELNEIGH &&
@@ -283,8 +334,7 @@ int print_neigh(struct nlmsghdr *n, void *arg)
 	if (!(filter.state&r->ndm_state) &&
 	    !(r->ndm_flags & NTF_PROXY) &&
 	    !(r->ndm_flags & NTF_EXT_LEARNED) &&
-	    (r->ndm_state || !(filter.state&0x100)) &&
-	    (r->ndm_family != AF_DECnet))
+	    (r->ndm_state || !(filter.state&0x100)))
 		return 0;
 
 	if (filter.master && !(n->nlmsg_flags & NLM_F_DUMP_FILTERED)) {
@@ -302,6 +352,8 @@ int print_neigh(struct nlmsghdr *n, void *arg)
 
 	if (tb[NDA_PROTOCOL])
 		protocol = rta_getattr_u8(tb[NDA_PROTOCOL]);
+	if (tb[NDA_FLAGS_EXT])
+		ext_flags = rta_getattr_u32(tb[NDA_FLAGS_EXT]);
 
 	if (filter.protocol && filter.protocol != protocol)
 		return 0;
@@ -336,6 +388,9 @@ int print_neigh(struct nlmsghdr *n, void *arg)
 		print_bool(PRINT_ANY, "deleted", "Deleted ", true);
 	else if (n->nlmsg_type == RTM_GETNEIGH)
 		print_null(PRINT_ANY, "miss", "%s ", "miss");
+
+	if (brief)
+		return print_neigh_brief(fp, r, tb);
 
 	if (tb[NDA_DST]) {
 		const char *dst;
@@ -376,27 +431,26 @@ int print_neigh(struct nlmsghdr *n, void *arg)
 			fprintf(fp, "lladdr ");
 
 		print_color_string(PRINT_ANY, COLOR_MAC,
-				   "lladdr", "%s", lladdr);
+				   "lladdr", "%s ", lladdr);
 	}
 
 	if (r->ndm_flags & NTF_ROUTER)
-		print_null(PRINT_ANY, "router", " %s", "router");
-
+		print_null(PRINT_ANY, "router", "%s ", "router");
 	if (r->ndm_flags & NTF_PROXY)
-		print_null(PRINT_ANY, "proxy", " %s", "proxy");
-
+		print_null(PRINT_ANY, "proxy", "%s ", "proxy");
+	if (ext_flags & NTF_EXT_MANAGED)
+		print_null(PRINT_ANY, "managed", "%s ", "managed");
 	if (r->ndm_flags & NTF_EXT_LEARNED)
-		print_null(PRINT_ANY, "extern_learn", " %s ", "extern_learn");
-
+		print_null(PRINT_ANY, "extern_learn", "%s ", "extern_learn");
 	if (r->ndm_flags & NTF_OFFLOADED)
-		print_null(PRINT_ANY, "offload", " %s", "offload");
+		print_null(PRINT_ANY, "offload", "%s ", "offload");
 
 	if (show_stats) {
 		if (tb[NDA_CACHEINFO])
 			print_cacheinfo(RTA_DATA(tb[NDA_CACHEINFO]));
 
 		if (tb[NDA_PROBES])
-			print_uint(PRINT_ANY, "probes", " probes %u",
+			print_uint(PRINT_ANY, "probes", "probes %u ",
 				   rta_getattr_u32(tb[NDA_PROBES]));
 	}
 
@@ -406,13 +460,13 @@ int print_neigh(struct nlmsghdr *n, void *arg)
 	if (protocol) {
 		SPRINT_BUF(b1);
 
-		print_string(PRINT_ANY, "protocol", " proto %s ",
+		print_string(PRINT_ANY, "protocol", "proto %s ",
 			     rtnl_rtprot_n2a(protocol, b1, sizeof(b1)));
 	}
 
 	print_string(PRINT_FP, NULL, "\n", "");
 	close_json_object();
-	fflush(stdout);
+	fflush(fp);
 
 	return 0;
 }
@@ -488,6 +542,8 @@ static int do_show_or_flush(int argc, char **argv, int flush)
 			if (!name_is_vrf(*argv))
 				invarg("Not a valid VRF name\n", *argv);
 			filter.master = ifindex;
+		} else if (strcmp(*argv, "nomaster") == 0) {
+			filter.master = -1;
 		} else if (strcmp(*argv, "unused") == 0) {
 			filter.unused_only = 1;
 		} else if (strcmp(*argv, "nud") == 0) {
@@ -668,10 +724,15 @@ static int ipneigh_get(int argc, char **argv)
 		return -2;
 
 	ipneigh_reset_filter(0);
+	new_json_obj(json);
 	if (print_neigh(answer, stdout) < 0) {
 		fprintf(stderr, "An error :-)\n");
+		free(answer);
+		delete_json_obj();
 		return -1;
 	}
+	free(answer);
+	delete_json_obj();
 
 	return 0;
 }

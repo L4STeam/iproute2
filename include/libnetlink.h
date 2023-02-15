@@ -37,6 +37,12 @@ struct nlmsg_chain {
 	struct nlmsg_list *tail;
 };
 
+struct ipstats_req {
+	struct nlmsghdr nlh;
+	struct if_stats_msg ifsm;
+	char buf[128];
+};
+
 extern int rcvbuf;
 
 int rtnl_open(struct rtnl_handle *rth, unsigned int subscriptions)
@@ -69,6 +75,8 @@ int rtnl_neightbldump_req(struct rtnl_handle *rth, int family)
 	__attribute__((warn_unused_result));
 int rtnl_mdbdump_req(struct rtnl_handle *rth, int family)
 	__attribute__((warn_unused_result));
+int rtnl_brvlandump_req(struct rtnl_handle *rth, int family, __u32 dump_flags)
+	__attribute__((warn_unused_result));
 int rtnl_netconfdump_req(struct rtnl_handle *rth, int family)
 	__attribute__((warn_unused_result));
 
@@ -86,7 +94,10 @@ int rtnl_fdb_linkdump_req_filter_fn(struct rtnl_handle *rth,
 int rtnl_nsiddump_req_filter_fn(struct rtnl_handle *rth, int family,
 				req_filter_fn_t filter_fn)
 	__attribute__((warn_unused_result));
-int rtnl_statsdump_req_filter(struct rtnl_handle *rth, int fam, __u32 filt_mask)
+int rtnl_statsdump_req_filter(struct rtnl_handle *rth, int fam, __u32 filt_mask,
+			      int (*filter_fn)(struct ipstats_req *req,
+					       void *data),
+			      void *filter_data)
 	__attribute__((warn_unused_result));
 int rtnl_dump_request(struct rtnl_handle *rth, int type, void *req,
 			     int len)
@@ -97,12 +108,40 @@ int rtnl_dump_request_n(struct rtnl_handle *rth, struct nlmsghdr *n)
 int rtnl_nexthopdump_req(struct rtnl_handle *rth, int family,
 			 req_filter_fn_t filter_fn)
 	__attribute__((warn_unused_result));
+int rtnl_nexthop_bucket_dump_req(struct rtnl_handle *rth, int family,
+				 req_filter_fn_t filter_fn)
+	__attribute__((warn_unused_result));
+
+int rtnl_tunneldump_req(struct rtnl_handle *rth, int family, int ifindex,
+			__u8 flags)
+	__attribute__((warn_unused_result));
 
 struct rtnl_ctrl_data {
 	int	nsid;
 };
 
 typedef int (*rtnl_filter_t)(struct nlmsghdr *n, void *);
+
+/**
+ * rtnl error handler called from
+ *      rtnl_dump_done()
+ *      rtnl_dump_error()
+ *
+ * Return value is a bitmask of the following values:
+ * RTNL_LET_NLERR
+ *      error handled as usual
+ * RTNL_SUPPRESS_NLMSG_DONE_NLERR
+ *      error in nlmsg_type == NLMSG_DONE will be suppressed
+ * RTNL_SUPPRESS_NLMSG_ERROR_NLERR
+ *      error in nlmsg_type == NLMSG_ERROR will be suppressed
+ *      and nlmsg will be skipped
+ * RTNL_SUPPRESS_NLERR - suppress error in both previous cases
+ */
+#define RTNL_LET_NLERR				0x01
+#define RTNL_SUPPRESS_NLMSG_DONE_NLERR		0x02
+#define RTNL_SUPPRESS_NLMSG_ERROR_NLERR		0x04
+#define RTNL_SUPPRESS_NLERR			0x06
+typedef int (*rtnl_err_hndlr_t)(struct nlmsghdr *n, void *);
 
 typedef int (*rtnl_listen_filter_t)(struct rtnl_ctrl_data *,
 				    struct nlmsghdr *n, void *);
@@ -113,6 +152,8 @@ typedef int (*nl_ext_ack_fn_t)(const char *errmsg, uint32_t off,
 struct rtnl_dump_filter_arg {
 	rtnl_filter_t filter;
 	void *arg1;
+	rtnl_err_hndlr_t errhndlr;
+	void *arg2;
 	__u16 nc_flags;
 };
 
@@ -121,6 +162,18 @@ int rtnl_dump_filter_nc(struct rtnl_handle *rth,
 			void *arg, __u16 nc_flags);
 #define rtnl_dump_filter(rth, filter, arg) \
 	rtnl_dump_filter_nc(rth, filter, arg, 0)
+int rtnl_dump_filter_errhndlr_nc(struct rtnl_handle *rth,
+				 rtnl_filter_t filter,
+				 void *arg1,
+				 rtnl_err_hndlr_t errhndlr,
+				 void *arg2,
+				 __u16 nc_flags);
+#define rtnl_dump_filter_errhndlr(rth, filter, farg, errhndlr, earg) \
+	rtnl_dump_filter_errhndlr_nc(rth, filter, farg, errhndlr, earg, 0)
+
+int rtnl_echo_talk(struct rtnl_handle *rtnl, struct nlmsghdr *n, int json,
+		   int (*print_info)(struct nlmsghdr *n, void *arg))
+	__attribute__((warn_unused_result));
 int rtnl_talk(struct rtnl_handle *rtnl, struct nlmsghdr *n,
 	      struct nlmsghdr **answer)
 	__attribute__((warn_unused_result));
@@ -135,7 +188,7 @@ int rtnl_send(struct rtnl_handle *rth, const void *buf, int)
 int rtnl_send_check(struct rtnl_handle *rth, const void *buf, int)
 	__attribute__((warn_unused_result));
 int nl_dump_ext_ack(const struct nlmsghdr *nlh, nl_ext_ack_fn_t errfn);
-int nl_dump_ext_ack_done(const struct nlmsghdr *nlh, int error);
+int nl_dump_ext_ack_done(const struct nlmsghdr *nlh, unsigned int offset, int error);
 
 int addattr(struct nlmsghdr *n, int maxlen, int type);
 int addattr8(struct nlmsghdr *n, int maxlen, int type, __u8 data);
@@ -278,6 +331,16 @@ int rtnl_from_file(FILE *, rtnl_listen_filter_t handler,
 #ifndef IFLA_STATS_RTA
 #define IFLA_STATS_RTA(r) \
 	((struct rtattr *)(((char *)(r)) + NLMSG_ALIGN(sizeof(struct if_stats_msg))))
+#endif
+
+#ifndef BRVLAN_RTA
+#define BRVLAN_RTA(r) \
+	((struct rtattr *)(((char *)(r)) + NLMSG_ALIGN(sizeof(struct br_vlan_msg))))
+#endif
+
+#ifndef TUNNEL_RTA
+#define TUNNEL_RTA(r) \
+	((struct rtattr *)(((char *)(r)) + NLMSG_ALIGN(sizeof(struct tunnel_msg))))
 #endif
 
 /* User defined nlmsg_type which is used mostly for logging netlink

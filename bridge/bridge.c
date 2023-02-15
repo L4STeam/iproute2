@@ -37,10 +37,10 @@ static void usage(void)
 	fprintf(stderr,
 "Usage: bridge [ OPTIONS ] OBJECT { COMMAND | help }\n"
 "       bridge [ -force ] -batch filename\n"
-"where	OBJECT := { link | fdb | mdb | vlan | monitor }\n"
-"	OPTIONS := { -V[ersion] | -s[tatistics] | -d[etails] |\n"
-"		     -o[neline] | -t[imestamp] | -n[etns] name |\n"
-"		     -c[ompressvlans] -color -p[retty] -j[son] }\n");
+"where  OBJECT := { link | fdb | mdb | vlan | monitor }\n"
+"       OPTIONS := { -V[ersion] | -s[tatistics] | -d[etails] |\n"
+"                    -o[neline] | -t[imestamp] | -n[etns] name |\n"
+"                    -c[ompressvlans] -color -p[retty] -j[son] }\n");
 	exit(-1);
 }
 
@@ -58,6 +58,7 @@ static const struct cmd {
 	{ "fdb",	do_fdb },
 	{ "mdb",	do_mdb },
 	{ "vlan",	do_vlan },
+	{ "vni",	do_vni },
 	{ "monitor",	do_monitor },
 	{ "help",	do_help },
 	{ 0 }
@@ -149,9 +150,9 @@ main(int argc, char **argv)
 			NEXT_ARG();
 			if (netns_switch(argv[1]))
 				exit(-1);
+		} else if (matches_color(opt, &color)) {
 		} else if (matches(opt, "-compressvlans") == 0) {
 			++compress_vlans;
-		} else if (matches_color(opt, &color)) {
 		} else if (matches(opt, "-force") == 0) {
 			++force;
 		} else if (matches(opt, "-json") == 0) {

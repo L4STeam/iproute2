@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <time.h>
+#include <stdint.h>
 
 #ifdef HAVE_LIBBSD
 #include <bsd/string.h>
@@ -35,6 +36,7 @@ extern int max_flush_loops;
 extern int batch_mode;
 extern int numeric;
 extern bool do_all;
+extern int echo_request;
 
 #ifndef CONFDIR
 #define CONFDIR		"/etc/iproute2"
@@ -49,6 +51,9 @@ void incomplete_command(void) __attribute__((noreturn));
 #define NEXT_ARG_OK() (argc - 1 > 0)
 #define NEXT_ARG_FWD() do { argv++; argc--; } while(0)
 #define PREV_ARG() do { argv--; argc++; } while(0)
+
+/* Upper limit for batch mode */
+#define MAX_ARGS 512
 
 #define TIME_UNITS_PER_SEC	1000000
 #define NSEC_PER_USEC 1000
@@ -104,17 +109,6 @@ static inline bool is_addrtype_inet_not_multi(const inet_prefix *p)
 {
 	return (p->flags & ADDRTYPE_INET_MULTI) == ADDRTYPE_INET;
 }
-
-#define DN_MAXADDL 20
-#ifndef AF_DECnet
-#define AF_DECnet 12
-#endif
-
-struct dn_naddr
-{
-        unsigned short          a_len;
-        unsigned char a_addr[DN_MAXADDL];
-};
 
 #ifndef AF_MPLS
 # define AF_MPLS 28
@@ -205,8 +199,14 @@ bool matches(const char *prefix, const char *string);
 int inet_addr_match(const inet_prefix *a, const inet_prefix *b, int bits);
 int inet_addr_match_rta(const inet_prefix *m, const struct rtattr *rta);
 
+const char *ax25_ntop(int af, const void *addr, char *str, socklen_t len);
+
+const char *rose_ntop(int af, const void *addr, char *buf, socklen_t buflen);
+
 const char *mpls_ntop(int af, const void *addr, char *str, size_t len);
 int mpls_pton(int af, const char *src, void *addr, size_t alen);
+
+const char *netrom_ntop(int af, const void *addr, char *str, socklen_t len);
 
 extern int __iproute2_hz_internal;
 int __get_hz(void);
@@ -262,9 +262,11 @@ int print_timestamp(FILE *fp);
 void print_nlmsg_timestamp(FILE *fp, const struct nlmsghdr *n);
 
 unsigned int print_name_and_link(const char *fmt,
-				 const char *name, struct rtattr *tb[]);
+				 const char *name, struct rtattr *tb[])
+	__attribute__((format(printf, 1, 0)));
 
-#define BIT(nr)                 (1UL << (nr))
+
+#define BIT(nr)                 (UINT64_C(1) << (nr))
 
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 
@@ -316,6 +318,7 @@ char *find_cgroup2_mount(bool do_mount);
 __u64 get_cgroup2_id(const char *path);
 char *get_cgroup2_path(__u64 id, bool full);
 int get_command_name(const char *pid, char *comm, size_t len);
+int get_task_name(pid_t pid, char *name, size_t len);
 
 int get_rtnl_link_stats_rta(struct rtnl_link_stats64 *stats64,
 			    struct rtattr *tb[]);
@@ -374,5 +377,15 @@ void free_indent_mem(struct indent_mem *mem);
 void inc_indent(struct indent_mem *mem);
 void dec_indent(struct indent_mem *mem);
 void print_indent(struct indent_mem *mem);
+
+struct proto {
+	int id;
+	const char *name;
+};
+
+int proto_a2n(unsigned short *id, const char *buf,
+	      const struct proto *proto_tb, size_t tb_len);
+const char *proto_n2a(unsigned short id, char *buf, int len,
+		      const struct proto *proto_tb, size_t tb_len);
 
 #endif /* __UTILS_H__ */

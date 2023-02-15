@@ -3,7 +3,7 @@
 # Copyright 2016 Quentin Monnet <quentin.monnet@6wind.com>
 
 QDISC_KIND=' choke codel bfifo pfifo pfifo_head_drop fq fq_codel gred hhf \
-            mqprio multiq netem pfifo_fast pie fq_pie red rr sfb sfq tbf atm \
+            mqprio multiq netem pfifo_fast pie fq_pie red sfb sfq tbf atm \
             cbq drr dsmark hfsc htb prio qfq dualpi2'
 FILTER_KIND=' basic bpf cgroup flow flower fw route rsvp tcindex u32 matchall '
 ACTION_KIND=' gact mirred bpf sample '
@@ -127,10 +127,10 @@ _tc_direct_complete()
         protocol) # list comes from lib/ll_proto.c
             COMPREPLY+=( $( compgen -W ' 802.1Q 802.1ad 802_2 802_3 LLDP aarp \
                 all aoe arp atalk atmfate atmmpoa ax25 bpq can control cust \
-                ddcmp dec diag dna_dl dna_rc dna_rt econet ieeepup ieeepupat \
-                ip ipv4 ipv6 ipx irda lat localtalk loop mobitex ppp_disc \
-                ppp_mp ppp_ses ppptalk pup pupat rarp sca snap tipc tr_802_2 \
-                wan_ppp x25' -- "$cur" ) )
+                ddcmp dec diag dna_dl dna_rc dna_rt econet ethercat ieeepup \
+                ieeepupat ip ipv4 ipv6 ipx irda lat localtalk loop mobitex \
+                ppp_disc ppp_mp ppp_ses ppptalk profinet pup pupat rarp sca \
+                snap tipc tr_802_2 wan_ppp x25' -- "$cur" ) )
             return 0
             ;;
         prio)
@@ -339,7 +339,7 @@ _tc_qdisc_options()
                 bandwidth ecn harddrop'
             return 0
             ;;
-        rr|prio)
+        prio)
             _tc_once_attr 'bands priomap multiqueue'
             return 0
             ;;

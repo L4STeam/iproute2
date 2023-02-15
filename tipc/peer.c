@@ -1,10 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * peer.c	TIPC peer functionality.
- *
- *		This program is free software; you can redistribute it and/or
- *		modify it under the terms of the GNU General Public License
- *		as published by the Free Software Foundation; either version
- *		2 of the License, or (at your option) any later version.
  *
  * Authors:	Richard Alpe <richard.alpe@ericsson.com>
  */
@@ -17,7 +13,6 @@
 #include <linux/tipc_netlink.h>
 #include <linux/tipc.h>
 #include <linux/genetlink.h>
-#include <libmnl/libmnl.h>
 
 #include "cmdl.h"
 #include "msg.h"
@@ -30,7 +25,6 @@ static int cmd_peer_rm_addr(struct nlmsghdr *nlh, const struct cmd *cmd,
 	char *str;
 	uint32_t addr;
 	struct nlattr *nest;
-	char buf[MNL_SOCKET_BUFFER_SIZE];
 
 	if ((cmdl->argc != cmdl->optind + 1) || help_flag) {
 		fprintf(stderr, "Usage: %s peer remove address ADDRESS\n",
@@ -47,7 +41,8 @@ static int cmd_peer_rm_addr(struct nlmsghdr *nlh, const struct cmd *cmd,
 	if (!addr)
 		return -1;
 
-	if (!(nlh = msg_init(buf, TIPC_NL_PEER_REMOVE))) {
+	nlh = msg_init(TIPC_NL_PEER_REMOVE);
+	if (!nlh) {
 		fprintf(stderr, "error, message initialisation failed\n");
 		return -1;
 	}
@@ -62,7 +57,6 @@ static int cmd_peer_rm_addr(struct nlmsghdr *nlh, const struct cmd *cmd,
 static int cmd_peer_rm_nodeid(struct nlmsghdr *nlh, const struct cmd *cmd,
 			      struct cmdl *cmdl, void *data)
 {
-	char buf[MNL_SOCKET_BUFFER_SIZE];
 	__u8 id[16] = {0,};
 	__u64 *w0 = (__u64 *)&id[0];
 	__u64 *w1 = (__u64 *)&id[8];
@@ -81,7 +75,7 @@ static int cmd_peer_rm_nodeid(struct nlmsghdr *nlh, const struct cmd *cmd,
 		return -EINVAL;
 	}
 
-	nlh = msg_init(buf, TIPC_NL_PEER_REMOVE);
+	nlh = msg_init(TIPC_NL_PEER_REMOVE);
 	if (!nlh) {
 		fprintf(stderr, "error, message initialisation failed\n");
 		return -1;

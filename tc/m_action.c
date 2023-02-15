@@ -1,10 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * m_action.c		Action Management
- *
- *		This program is free software; you can distribute it and/or
- *		modify it under the terms of the GNU General Public License
- *		as published by the Free Software Foundation; either version
- *		2 of the License, or (at your option) any later version.
  *
  * Authors:  J Hadi Salim (hadi@cyberus.ca)
  *
@@ -51,9 +47,10 @@ static void act_usage(void)
 		"	FL := ls | list | flush | <ACTNAMESPEC>\n"
 		"	ACTNAMESPEC :=  action <ACTNAME>\n"
 		"	ACTISPEC := <ACTNAMESPEC> <INDEXSPEC>\n"
-		"	ACTSPEC := action <ACTDETAIL> [INDEXSPEC] [HWSTATSSPEC]\n"
+		"	ACTSPEC := action <ACTDETAIL> [INDEXSPEC] [HWSTATSSPEC] [SKIPSPEC]\n"
 		"	INDEXSPEC := index <32 bit indexvalue>\n"
 		"	HWSTATSSPEC := hw_stats [ immediate | delayed | disabled ]\n"
+		"	SKIPSPEC := [ skip_sw | skip_hw ]\n"
 		"	ACTDETAIL := <ACTNAME> <ACTPARAMS>\n"
 		"		Example ACTNAME is gact, mirred, bpf, etc\n"
 		"		Each action has its own parameters (ACTPARAMS)\n"
@@ -245,6 +242,8 @@ int parse_action(int *argc_p, char ***argv_p, int tca_id, struct nlmsghdr *n)
 			goto done0;
 		} else {
 			struct action_util *a = NULL;
+			int skip_loop = 2;
+			__u32 flag = 0;
 
 			if (!action_a2n(*argv, NULL, false))
 				strncpy(k, "gact", sizeof(k) - 1);
@@ -314,13 +313,27 @@ done0:
 			}
 
 			if (*argv && strcmp(*argv, "no_percpu") == 0) {
+				flag |= TCA_ACT_FLAGS_NO_PERCPU_STATS;
+				NEXT_ARG_FWD();
+			}
+
+			/* we need to parse twice to fix skip flag out of order */
+			while (skip_loop--) {
+				if (*argv && strcmp(*argv, "skip_sw") == 0) {
+					flag |= TCA_ACT_FLAGS_SKIP_SW;
+					NEXT_ARG_FWD();
+				} else if (*argv && strcmp(*argv, "skip_hw") == 0) {
+					flag |= TCA_ACT_FLAGS_SKIP_HW;
+					NEXT_ARG_FWD();
+				}
+			}
+
+			if (flag) {
 				struct nla_bitfield32 flags =
-					{ TCA_ACT_FLAGS_NO_PERCPU_STATS,
-					  TCA_ACT_FLAGS_NO_PERCPU_STATS };
+					{ flag, flag };
 
 				addattr_l(n, MAX_MSG, TCA_ACT_FLAGS, &flags,
 					  sizeof(struct nla_bitfield32));
-				NEXT_ARG_FWD();
 			}
 
 			addattr_nest_end(n, tail);
@@ -347,7 +360,7 @@ bad_val:
 	return -1;
 }
 
-static int tc_print_one_action(FILE *f, struct rtattr *arg)
+static int tc_print_one_action(FILE *f, struct rtattr *arg, bool bind)
 {
 
 	struct rtattr *tb[TCA_ACT_MAX + 1];
@@ -396,14 +409,52 @@ static int tc_print_one_action(FILE *f, struct rtattr *arg)
 					   strsz, b1, sizeof(b1)));
 		print_nl();
 	}
-	if (tb[TCA_ACT_FLAGS]) {
-		struct nla_bitfield32 *flags = RTA_DATA(tb[TCA_ACT_FLAGS]);
+	if (tb[TCA_ACT_FLAGS] || tb[TCA_ACT_IN_HW_COUNT]) {
+		bool skip_hw = false;
+		bool newline = false;
 
-		if (flags->selector & TCA_ACT_FLAGS_NO_PERCPU_STATS)
-			print_bool(PRINT_ANY, "no_percpu", "\tno_percpu",
-				   flags->value &
-				   TCA_ACT_FLAGS_NO_PERCPU_STATS);
-		print_nl();
+		if (tb[TCA_ACT_FLAGS]) {
+			struct nla_bitfield32 *flags = RTA_DATA(tb[TCA_ACT_FLAGS]);
+
+			if (flags->selector & TCA_ACT_FLAGS_NO_PERCPU_STATS) {
+				newline = true;
+				print_bool(PRINT_ANY, "no_percpu", "\tno_percpu",
+					   flags->value &
+					   TCA_ACT_FLAGS_NO_PERCPU_STATS);
+			}
+			if (!bind) {
+				if (flags->selector & TCA_ACT_FLAGS_SKIP_HW) {
+					newline = true;
+					print_bool(PRINT_ANY, "skip_hw", "\tskip_hw",
+						   flags->value &
+						   TCA_ACT_FLAGS_SKIP_HW);
+					skip_hw = !!(flags->value & TCA_ACT_FLAGS_SKIP_HW);
+				}
+				if (flags->selector & TCA_ACT_FLAGS_SKIP_SW) {
+					newline = true;
+					print_bool(PRINT_ANY, "skip_sw", "\tskip_sw",
+						   flags->value &
+						   TCA_ACT_FLAGS_SKIP_SW);
+				}
+			}
+		}
+		if (tb[TCA_ACT_IN_HW_COUNT] && !bind && !skip_hw) {
+			__u32 count = rta_getattr_u32(tb[TCA_ACT_IN_HW_COUNT]);
+
+			newline = true;
+			if (count) {
+				print_bool(PRINT_ANY, "in_hw", "\tin_hw",
+					   true);
+				print_uint(PRINT_ANY, "in_hw_count",
+					   " in_hw_count %u", count);
+			} else {
+				print_bool(PRINT_ANY, "not_in_hw",
+					   "\tnot_in_hw", true);
+			}
+		}
+
+		if (newline)
+			print_nl();
 	}
 	if (tb[TCA_ACT_HW_STATS])
 		print_hw_stats(tb[TCA_ACT_HW_STATS], false);
@@ -440,8 +491,9 @@ tc_print_action_flush(FILE *f, const struct rtattr *arg)
 	return 0;
 }
 
-int
-tc_print_action(FILE *f, const struct rtattr *arg, unsigned short tot_acts)
+static int
+tc_dump_action(FILE *f, const struct rtattr *arg, unsigned short tot_acts,
+	       bool bind)
 {
 
 	int i;
@@ -466,10 +518,8 @@ tc_print_action(FILE *f, const struct rtattr *arg, unsigned short tot_acts)
 			print_nl();
 			print_uint(PRINT_ANY, "order",
 				   "\taction order %u: ", i);
-			if (tc_print_one_action(f, tb[i]) < 0) {
-				print_string(PRINT_FP, NULL,
-					     "Error printing action\n", NULL);
-			}
+			if (tc_print_one_action(f, tb[i], bind) < 0)
+				fprintf(stderr, "Error printing action\n");
 			close_json_object();
 		}
 
@@ -477,6 +527,12 @@ tc_print_action(FILE *f, const struct rtattr *arg, unsigned short tot_acts)
 	close_json_array(PRINT_JSON, NULL);
 
 	return 0;
+}
+
+int
+tc_print_action(FILE *f, const struct rtattr *arg, unsigned short tot_acts)
+{
+	return tc_dump_action(f, arg, tot_acts, true);
 }
 
 int print_action(struct nlmsghdr *n, void *arg)
@@ -529,7 +585,8 @@ int print_action(struct nlmsghdr *n, void *arg)
 	}
 
 	open_json_object(NULL);
-	tc_print_action(fp, tb[TCA_ACT_TAB], tot_acts ? *tot_acts:0);
+	tc_dump_action(fp, tb[TCA_ACT_TAB], tot_acts ? *tot_acts:0, false);
+	print_ext_msg(tb);
 	close_json_object();
 
 	return 0;

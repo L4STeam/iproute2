@@ -44,7 +44,11 @@ static void usage(void)
 		"       bridge fdb [ show [ br BRDEV ] [ brport DEV ] [ vlan VID ]\n"
 		"              [ state STATE ] [ dynamic ] ]\n"
 		"       bridge fdb get [ to ] LLADDR [ br BRDEV ] { brport | dev } DEV\n"
-		"              [ vlan VID ] [ vni VNI ] [ self ] [ master ] [ dynamic ]\n");
+		"              [ vlan VID ] [ vni VNI ] [ self ] [ master ] [ dynamic ]\n"
+		"       bridge fdb flush dev DEV [ brport DEV ] [ vlan VID ]\n"
+		"              [ self ] [ master ] [ [no]permanent | [no]static | [no]dynamic ]\n"
+		"              [ [no]added_by_user ] [ [no]extern_learn ] [ [no]sticky ]\n"
+		"              [ [no]offloaded ]\n");
 	exit(-1);
 }
 
@@ -89,7 +93,7 @@ static int state_a2n(unsigned int *s, const char *arg)
 	return 0;
 }
 
-static void fdb_print_flags(FILE *fp, unsigned int flags)
+static void fdb_print_flags(FILE *fp, unsigned int flags, __u32 ext_flags)
 {
 	open_json_array(PRINT_JSON,
 			is_json_context() ?  "flags" : "");
@@ -111,6 +115,9 @@ static void fdb_print_flags(FILE *fp, unsigned int flags)
 
 	if (flags & NTF_STICKY)
 		print_string(PRINT_ANY, NULL, "%s ", "sticky");
+
+	if (ext_flags & NTF_EXT_LOCKED)
+		print_string(PRINT_ANY, NULL, "%s ", "locked");
 
 	close_json_array(PRINT_JSON, NULL);
 }
@@ -140,6 +147,7 @@ int print_fdb(struct nlmsghdr *n, void *arg)
 	struct ndmsg *r = NLMSG_DATA(n);
 	int len = n->nlmsg_len;
 	struct rtattr *tb[NDA_MAX+1];
+	__u32 ext_flags = 0;
 	__u16 vid = 0;
 
 	if (n->nlmsg_type != RTM_NEWNEIGH && n->nlmsg_type != RTM_DELNEIGH) {
@@ -166,6 +174,9 @@ int print_fdb(struct nlmsghdr *n, void *arg)
 	parse_rtattr(tb, NDA_MAX, NDA_RTA(r),
 		     n->nlmsg_len - NLMSG_LENGTH(sizeof(*r)));
 
+	if (tb[NDA_FLAGS_EXT])
+		ext_flags = rta_getattr_u32(tb[NDA_FLAGS_EXT]);
+
 	if (tb[NDA_VLAN])
 		vid = rta_getattr_u16(tb[NDA_VLAN]);
 
@@ -174,6 +185,8 @@ int print_fdb(struct nlmsghdr *n, void *arg)
 
 	if (filter_dynamic && (r->ndm_state & NUD_PERMANENT))
 		return 0;
+
+	print_headers(fp, "[NEIGH]");
 
 	open_json_object(NULL);
 	if (n->nlmsg_type == RTM_DELNEIGH)
@@ -192,10 +205,13 @@ int print_fdb(struct nlmsghdr *n, void *arg)
 				   "mac", "%s ", lladdr);
 	}
 
-	if (!filter_index && r->ndm_ifindex)
+	if (!filter_index && r->ndm_ifindex) {
+		print_string(PRINT_FP, NULL, "dev ", NULL);
+
 		print_color_string(PRINT_ANY, COLOR_IFNAME,
-				   "ifname", "dev %s ",
+				   "ifname", "%s ",
 				   ll_index_to_name(r->ndm_ifindex));
+	}
 
 	if (tb[NDA_DST]) {
 		int family = AF_INET;
@@ -208,9 +224,11 @@ int print_fdb(struct nlmsghdr *n, void *arg)
 				  RTA_PAYLOAD(tb[NDA_DST]),
 				  RTA_DATA(tb[NDA_DST]));
 
+		print_string(PRINT_FP, NULL, "dst ", NULL);
+
 		print_color_string(PRINT_ANY,
 				   ifa_family_color(family),
-				    "dst", "dst %s ", dst);
+				   "dst", "%s ", dst);
 	}
 
 	if (vid)
@@ -257,7 +275,7 @@ int print_fdb(struct nlmsghdr *n, void *arg)
 	if (show_stats && tb[NDA_CACHEINFO])
 		fdb_print_stats(fp, RTA_DATA(tb[NDA_CACHEINFO]));
 
-	fdb_print_flags(fp, r->ndm_flags);
+	fdb_print_flags(fp, r->ndm_flags, ext_flags);
 
 
 	if (tb[NDA_MASTER])
@@ -566,6 +584,7 @@ static int fdb_get(int argc, char **argv)
 	char *addr = NULL;
 	short vlan = -1;
 	char *endptr;
+	int ret;
 
 	while (argc > 0) {
 		if ((strcmp(*argv, "brport") == 0) || strcmp(*argv, "dev") == 0) {
@@ -652,11 +671,147 @@ static int fdb_get(int argc, char **argv)
 	 * if -json was specified.
 	 */
 	new_json_obj(json);
+	ret = 0;
 	if (print_fdb(answer, stdout) < 0) {
 		fprintf(stderr, "An error :-)\n");
-		return -1;
+		ret = -1;
 	}
 	delete_json_obj();
+	free(answer);
+
+	return ret;
+}
+
+static int fdb_flush(int argc, char **argv)
+{
+	struct {
+		struct nlmsghdr	n;
+		struct ndmsg		ndm;
+		char			buf[256];
+	} req = {
+		.n.nlmsg_len = NLMSG_LENGTH(sizeof(struct ndmsg)),
+		.n.nlmsg_flags = NLM_F_REQUEST | NLM_F_BULK,
+		.n.nlmsg_type = RTM_DELNEIGH,
+		.ndm.ndm_family = PF_BRIDGE,
+	};
+	unsigned short ndm_state_mask = 0;
+	unsigned short ndm_flags_mask = 0;
+	short vid = -1, port_ifidx = -1;
+	unsigned short ndm_flags = 0;
+	unsigned short ndm_state = 0;
+	char *d = NULL, *port = NULL;
+
+	while (argc > 0) {
+		if (strcmp(*argv, "dev") == 0) {
+			NEXT_ARG();
+			d = *argv;
+		} else if (strcmp(*argv, "master") == 0) {
+			ndm_flags |= NTF_MASTER;
+		} else if (strcmp(*argv, "self") == 0) {
+			ndm_flags |= NTF_SELF;
+		} else if (strcmp(*argv, "permanent") == 0) {
+			ndm_state |= NUD_PERMANENT;
+			ndm_state_mask |= NUD_PERMANENT;
+		} else if (strcmp(*argv, "nopermanent") == 0) {
+			ndm_state &= ~NUD_PERMANENT;
+			ndm_state_mask |= NUD_PERMANENT;
+		} else if (strcmp(*argv, "static") == 0) {
+			ndm_state |= NUD_NOARP;
+			ndm_state_mask |= NUD_NOARP | NUD_PERMANENT;
+		} else if (strcmp(*argv, "nostatic") == 0) {
+			ndm_state &= ~NUD_NOARP;
+			ndm_state_mask |= NUD_NOARP;
+		} else if (strcmp(*argv, "dynamic") == 0) {
+			ndm_state &= ~NUD_NOARP | NUD_PERMANENT;
+			ndm_state_mask |= NUD_NOARP | NUD_PERMANENT;
+		} else if (strcmp(*argv, "nodynamic") == 0) {
+			ndm_state |= NUD_NOARP;
+			ndm_state_mask |= NUD_NOARP;
+		} else if (strcmp(*argv, "added_by_user") == 0) {
+			ndm_flags |= NTF_USE;
+			ndm_flags_mask |= NTF_USE;
+		} else if (strcmp(*argv, "noadded_by_user") == 0) {
+			ndm_flags &= ~NTF_USE;
+			ndm_flags_mask |= NTF_USE;
+		} else if (strcmp(*argv, "extern_learn") == 0) {
+			ndm_flags |= NTF_EXT_LEARNED;
+			ndm_flags_mask |= NTF_EXT_LEARNED;
+		} else if (strcmp(*argv, "noextern_learn") == 0) {
+			ndm_flags &= ~NTF_EXT_LEARNED;
+			ndm_flags_mask |= NTF_EXT_LEARNED;
+		} else if (strcmp(*argv, "sticky") == 0) {
+			ndm_flags |= NTF_STICKY;
+			ndm_flags_mask |= NTF_STICKY;
+		} else if (strcmp(*argv, "nosticky") == 0) {
+			ndm_flags &= ~NTF_STICKY;
+			ndm_flags_mask |= NTF_STICKY;
+		} else if (strcmp(*argv, "offloaded") == 0) {
+			ndm_flags |= NTF_OFFLOADED;
+			ndm_flags_mask |= NTF_OFFLOADED;
+		} else if (strcmp(*argv, "nooffloaded") == 0) {
+			ndm_flags &= ~NTF_OFFLOADED;
+			ndm_flags_mask |= NTF_OFFLOADED;
+		} else if (strcmp(*argv, "brport") == 0) {
+			if (port)
+				duparg2("brport", *argv);
+			NEXT_ARG();
+			port = *argv;
+		} else if (strcmp(*argv, "vlan") == 0) {
+			if (vid >= 0)
+				duparg2("vlan", *argv);
+			NEXT_ARG();
+			vid = atoi(*argv);
+		} else {
+			if (strcmp(*argv, "help") == 0)
+				NEXT_ARG();
+		}
+		argc--; argv++;
+	}
+
+	if (d == NULL) {
+		fprintf(stderr, "Device is a required argument.\n");
+		return -1;
+	}
+
+	req.ndm.ndm_ifindex = ll_name_to_index(d);
+	if (req.ndm.ndm_ifindex == 0) {
+		fprintf(stderr, "Cannot find bridge device \"%s\"\n", d);
+		return -1;
+	}
+
+	if (port) {
+		port_ifidx = ll_name_to_index(port);
+		if (port_ifidx == 0) {
+			fprintf(stderr, "Cannot find bridge port device \"%s\"\n",
+				port);
+			return -1;
+		}
+	}
+
+	if (vid >= 4096) {
+		fprintf(stderr, "Invalid VLAN ID \"%hu\"\n", vid);
+		return -1;
+	}
+
+	/* if self and master were not specified assume self */
+	if (!(ndm_flags & (NTF_SELF | NTF_MASTER)))
+		ndm_flags |= NTF_SELF;
+
+	req.ndm.ndm_flags = ndm_flags;
+	req.ndm.ndm_state = ndm_state;
+	if (port_ifidx > -1)
+		addattr32(&req.n, sizeof(req), NDA_IFINDEX, port_ifidx);
+	if (vid > -1)
+		addattr16(&req.n, sizeof(req), NDA_VLAN, vid);
+	if (ndm_flags_mask)
+		addattr8(&req.n, sizeof(req), NDA_NDM_FLAGS_MASK,
+			 ndm_flags_mask);
+	if (ndm_state_mask)
+		addattr16(&req.n, sizeof(req), NDA_NDM_STATE_MASK,
+			  ndm_state_mask);
+
+	if (rtnl_talk(&rth, &req.n, NULL) < 0)
+		return -1;
 
 	return 0;
 }
@@ -664,6 +819,7 @@ static int fdb_get(int argc, char **argv)
 int do_fdb(int argc, char **argv)
 {
 	ll_init_map(&rth);
+	timestamp = 0;
 
 	if (argc > 0) {
 		if (matches(*argv, "add") == 0)
@@ -680,6 +836,8 @@ int do_fdb(int argc, char **argv)
 		    matches(*argv, "lst") == 0 ||
 		    matches(*argv, "list") == 0)
 			return fdb_show(argc-1, argv+1);
+		if (strcmp(*argv, "flush") == 0)
+			return fdb_flush(argc-1, argv+1);
 		if (matches(*argv, "help") == 0)
 			usage();
 	} else

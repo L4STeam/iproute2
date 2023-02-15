@@ -1,13 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * iprule.c		"ip rule".
  *
- *		This program is free software; you can redistribute it and/or
- *		modify it under the terms of the GNU General Public License
- *		as published by the Free Software Foundation; either version
- *		2 of the License, or (at your option) any later version.
- *
  * Authors:	Alexey Kuznetsov, <kuznet@ms2.inr.ac.ru>
- *
  */
 
 #include <stdio.h>
@@ -592,7 +587,8 @@ static int iprule_list_flush_or_save(int argc, char **argv, int action)
 			filter.prefmask = 1;
 		} else if (strcmp(*argv, "not") == 0) {
 			filter.not = 1;
-		} else if (strcmp(*argv, "tos") == 0) {
+		} else if (strcmp(*argv, "tos") == 0 ||
+			   strcmp(*argv, "dsfield") == 0) {
 			__u32 tos;
 
 			NEXT_ARG();
@@ -699,7 +695,7 @@ static int iprule_list_flush_or_save(int argc, char **argv, int action)
 			else if (ret != 2)
 				invarg("invalid dport range\n", *argv);
 			filter.dport = r;
-		} else{
+		} else {
 			if (matches(*argv, "dst") == 0 ||
 			    matches(*argv, "to") == 0) {
 				NEXT_ARG();
@@ -786,6 +782,7 @@ static int iprule_modify(int cmd, int argc, char **argv)
 		.frh.family = preferred_family,
 		.frh.action = FR_ACT_UNSPEC,
 	};
+	int ret;
 
 	if (cmd == RTM_NEWRULE) {
 		if (argc == 0) {
@@ -1015,7 +1012,12 @@ static int iprule_modify(int cmd, int argc, char **argv)
 	if (!table_ok && cmd == RTM_NEWRULE)
 		req.frh.table = RT_TABLE_MAIN;
 
-	if (rtnl_talk(&rth, &req.n, NULL) < 0)
+	if (echo_request)
+		ret = rtnl_echo_talk(&rth, &req.n, json, print_rule);
+	else
+		ret = rtnl_talk(&rth, &req.n, NULL);
+
+	if (ret)
 		return -2;
 
 	return 0;

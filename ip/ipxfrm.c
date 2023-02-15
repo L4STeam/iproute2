@@ -1,25 +1,9 @@
-/* $USAGI: $ */
-
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * Copyright (C)2004 USAGI/WIDE Project
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, see <http://www.gnu.org/licenses>.
- */
-/*
  * based on ip.c, iproute.c
- */
-/*
+ *
  * Authors:
  *	Masahide NAKAMURA @USAGI
  */
@@ -688,8 +672,8 @@ done:
 	return 0;
 }
 
-void xfrm_xfrma_print(struct rtattr *tb[], __u16 family,
-		      FILE *fp, const char *prefix, bool nokeys)
+void xfrm_xfrma_print(struct rtattr *tb[], __u16 family, FILE *fp,
+		      const char *prefix, bool nokeys, bool dir)
 {
 	if (tb[XFRMA_MARK]) {
 		struct rtattr *rta = tb[XFRMA_MARK];
@@ -895,8 +879,13 @@ void xfrm_xfrma_print(struct rtattr *tb[], __u16 family,
 
 		xuo = (struct xfrm_user_offload *)
 			RTA_DATA(tb[XFRMA_OFFLOAD_DEV]);
-		fprintf(fp, "dev %s dir %s", ll_index_to_name(xuo->ifindex),
+		fprintf(fp, "dev %s ",
+			ll_index_to_name(xuo->ifindex));
+		if (dir)
+			fprintf(fp, "dir %s ",
 			(xuo->flags & XFRM_OFFLOAD_INBOUND) ? "in" : "out");
+		fprintf(fp, "mode %s",
+			(xuo->flags & XFRM_OFFLOAD_PACKET) ? "packet" : "crypto");
 		fprintf(fp, "%s", _SL_);
 	}
 	if (tb[XFRMA_IF_ID]) {
@@ -905,6 +894,14 @@ void xfrm_xfrma_print(struct rtattr *tb[], __u16 family,
 		if (prefix)
 			fputs(prefix, fp);
 		fprintf(fp, "if_id %#x", if_id);
+		fprintf(fp, "%s", _SL_);
+	}
+	if (tb[XFRMA_TFCPAD]) {
+		__u32 tfcpad = rta_getattr_u32(tb[XFRMA_TFCPAD]);
+
+		if (prefix)
+			fputs(prefix, fp);
+		fprintf(fp, "tfcpad %u", tfcpad);
 		fprintf(fp, "%s", _SL_);
 	}
 }
@@ -980,7 +977,7 @@ void xfrm_state_info_print(struct xfrm_usersa_info *xsinfo,
 		fprintf(fp, " (0x%s)", strxf_mask8(xsinfo->flags));
 	fprintf(fp, "%s", _SL_);
 
-	xfrm_xfrma_print(tb, xsinfo->family, fp, buf, nokeys);
+	xfrm_xfrma_print(tb, xsinfo->family, fp, buf, nokeys, true);
 
 	if (!xfrm_selector_iszero(&xsinfo->sel)) {
 		char sbuf[STRBUF_SIZE];
@@ -1086,7 +1083,7 @@ void xfrm_policy_info_print(struct xfrm_userpolicy_info *xpinfo,
 	if (show_stats > 0)
 		xfrm_lifetime_print(&xpinfo->lft, &xpinfo->curlft, fp, buf);
 
-	xfrm_xfrma_print(tb, xpinfo->sel.family, fp, buf, false);
+	xfrm_xfrma_print(tb, xpinfo->sel.family, fp, buf, false, false);
 }
 
 int xfrm_id_parse(xfrm_address_t *saddr, struct xfrm_id *id, __u16 *family,

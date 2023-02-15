@@ -1,13 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * iproute.c		"ip route".
  *
- *		This program is free software; you can redistribute it and/or
- *		modify it under the terms of the GNU General Public License
- *		as published by the Free Software Foundation; either version
- *		2 of the License, or (at your option) any later version.
- *
  * Authors:	Alexey Kuznetsov, <kuznet@ms2.inr.ac.ru>
- *
  */
 
 #include <stdio.h>
@@ -28,6 +23,7 @@
 #include "rt_names.h"
 #include "utils.h"
 #include "ip_common.h"
+#include "nh_common.h"
 
 #ifndef RTAX_RTTVAR
 #define RTAX_RTTVAR RTAX_HOPS
@@ -82,7 +78,7 @@ static void usage(void)
 		"             [ ttl-propagate { enabled | disabled } ]\n"
 		"INFO_SPEC := { NH | nhid ID } OPTIONS FLAGS [ nexthop NH ]...\n"
 		"NH := [ encap ENCAPTYPE ENCAPHDR ] [ via [ FAMILY ] ADDRESS ]\n"
-		"	    [ dev STRING ] [ weight NUMBER ] NHFLAGS\n"
+		"      [ dev STRING ] [ weight NUMBER ] NHFLAGS\n"
 		"FAMILY := [ inet | inet6 | mpls | bridge | link ]\n"
 		"OPTIONS := FLAGS [ mtu NUMBER ] [ advmss NUMBER ] [ as [ to ] ADDRESS ]\n"
 		"           [ rtt TIME ] [ rttvar TIME ] [ reordering NUMBER ]\n"
@@ -101,10 +97,21 @@ static void usage(void)
 		"TIME := NUMBER[s|ms]\n"
 		"BOOL := [1|0]\n"
 		"FEATURES := ecn\n"
-		"ENCAPTYPE := [ mpls | ip | ip6 | seg6 | seg6local | rpl ]\n"
-		"ENCAPHDR := [ MPLSLABEL | SEG6HDR ]\n"
+		"ENCAPTYPE := [ mpls | ip | ip6 | seg6 | seg6local | rpl | ioam6 | xfrm ]\n"
+		"ENCAPHDR := [ MPLSLABEL | SEG6HDR | SEG6LOCAL | IOAM6HDR | XFRMINFO ]\n"
 		"SEG6HDR := [ mode SEGMODE ] segs ADDR1,ADDRi,ADDRn [hmac HMACKEYID] [cleanup]\n"
-		"SEGMODE := [ encap | inline ]\n"
+		"SEGMODE := [ encap | encap.red | inline | l2encap | l2encap.red ]\n"
+		"SEG6LOCAL := action ACTION [ OPTIONS ] [ count ]\n"
+		"ACTION := { End | End.X | End.T | End.DX2 | End.DX6 | End.DX4 |\n"
+		"            End.DT6 | End.DT4 | End.DT46 | End.B6 | End.B6.Encaps |\n"
+		"            End.BM | End.S | End.AS | End.AM | End.BPF }\n"
+		"OPTIONS := OPTION [ OPTIONS ]\n"
+		"OPTION := { flavors FLAVORS | srh SEG6HDR | nh4 ADDR | nh6 ADDR | iif DEV | oif DEV |\n"
+		"            table TABLEID | vrftable TABLEID | endpoint PROGNAME }\n"
+		"FLAVORS := { FLAVOR[,FLAVOR] }\n"
+		"FLAVOR := { psp | usp | usd | next-csid }\n"
+		"IOAM6HDR := trace prealloc type IOAM6_TRACE_TYPE ns IOAM6_NAMESPACE size IOAM6_TRACE_SIZE\n"
+		"XFRMINFO := if_id IF_ID [ link_dev LINK ]\n"
 		"ROUTE_GET_FLAGS := [ fibmatch ]\n");
 	exit(-1);
 }
@@ -402,13 +409,13 @@ static void print_rt_pref(FILE *fp, unsigned int pref)
 	}
 }
 
-void print_rta_if(FILE *fp, const struct rtattr *rta, const char *prefix)
+void print_rta_ifidx(FILE *fp, __u32 ifidx, const char *prefix)
 {
-	const char *ifname = ll_index_to_name(rta_getattr_u32(rta));
+	const char *ifname = ll_index_to_name(ifidx);
 
-	if (is_json_context())
+	if (is_json_context()) {
 		print_string(PRINT_JSON, prefix, NULL, ifname);
-	else {
+	} else {
 		fprintf(fp, "%s ", prefix);
 		color_fprintf(fp, COLOR_IFNAME, "%s ", ifname);
 	}
@@ -539,18 +546,23 @@ static void print_rta_newdst(FILE *fp, const struct rtmsg *r,
 	}
 }
 
-void print_rta_gateway(FILE *fp, unsigned char family, const struct rtattr *rta)
+void __print_rta_gateway(FILE *fp, unsigned char family, const char *gateway)
 {
-	const char *gateway = format_host_rta(family, rta);
-
-	if (is_json_context())
+	if (is_json_context()) {
 		print_string(PRINT_JSON, "gateway", NULL, gateway);
-	else {
+	} else {
 		fprintf(fp, "via ");
 		print_color_string(PRINT_FP,
 				   ifa_family_color(family),
 				   NULL, "%s ", gateway);
 	}
+}
+
+void print_rta_gateway(FILE *fp, unsigned char family, const struct rtattr *rta)
+{
+	const char *gateway = format_host_rta(family, rta);
+
+	__print_rta_gateway(fp, family, gateway);
 }
 
 static void print_rta_via(FILE *fp, const struct rtattr *rta)
@@ -854,7 +866,7 @@ int print_route(struct nlmsghdr *n, void *arg)
 		print_rta_via(fp, tb[RTA_VIA]);
 
 	if (tb[RTA_OIF] && filter.oifmask != -1)
-		print_rta_if(fp, tb[RTA_OIF], "dev");
+		print_rta_ifidx(fp, rta_getattr_u32(tb[RTA_OIF]), "dev");
 
 	if (table && (table != RT_TABLE_MAIN || show_details > 0) && !filter.tb)
 		print_string(PRINT_ANY,
@@ -938,7 +950,7 @@ int print_route(struct nlmsghdr *n, void *arg)
 		print_rta_metrics(fp, tb[RTA_METRICS]);
 
 	if (tb[RTA_IIF] && filter.iifmask != -1)
-		print_rta_if(fp, tb[RTA_IIF], "iif");
+		print_rta_ifidx(fp, rta_getattr_u32(tb[RTA_IIF]), "iif");
 
 	if (tb[RTA_PREF])
 		print_rt_pref(fp, rta_getattr_u8(tb[RTA_PREF]));
@@ -954,6 +966,10 @@ int print_route(struct nlmsghdr *n, void *arg)
 				     "ttl-propogate %s",
 				     propagate ? "enabled" : "disabled");
 	}
+
+	if (tb[RTA_NH_ID] && show_details)
+		print_cache_nexthop_id(fp, "\n\tnh_info ", "nh_info",
+				       rta_getattr_u32(tb[RTA_NH_ID]));
 
 	if (tb[RTA_MULTIPATH])
 		print_rta_multipath(fp, r, tb[RTA_MULTIPATH]);
@@ -1113,6 +1129,7 @@ static int iproute_modify(int cmd, unsigned int flags, int argc, char **argv)
 	int raw = 0;
 	int type_ok = 0;
 	__u32 nhid = 0;
+	int ret;
 
 	if (cmd != RTM_DELROUTE) {
 		req.r.rtm_protocol = RTPROT_BOOT;
@@ -1566,7 +1583,12 @@ static int iproute_modify(int cmd, unsigned int flags, int argc, char **argv)
 	if (!type_ok && req.r.rtm_family == AF_MPLS)
 		req.r.rtm_type = RTN_UNICAST;
 
-	if (rtnl_talk(&rth, &req.n, NULL) < 0)
+	if (echo_request)
+		ret = rtnl_echo_talk(&rth, &req.n, json, print_route);
+	else
+		ret = rtnl_talk(&rth, &req.n, NULL);
+
+	if (ret)
 		return -2;
 
 	return 0;
@@ -1725,6 +1747,18 @@ static int iproute_flush(int family, rtnl_filter_t filter_fn)
 			fflush(stdout);
 		}
 	}
+}
+
+static int save_route_errhndlr(struct nlmsghdr *n, void *arg)
+{
+	int err = -*(int *)NLMSG_DATA(n);
+
+	if (n->nlmsg_type == NLMSG_DONE &&
+	    filter.tb == RT_TABLE_MAIN &&
+	    err == ENOENT)
+		return RTNL_SUPPRESS_NLMSG_DONE_NLERR;
+
+	return RTNL_LET_NLERR;
 }
 
 static int iproute_list_flush_or_save(int argc, char **argv, int action)
@@ -1939,7 +1973,8 @@ static int iproute_list_flush_or_save(int argc, char **argv, int action)
 
 	new_json_obj(json);
 
-	if (rtnl_dump_filter(&rth, filter_fn, stdout) < 0) {
+	if (rtnl_dump_filter_errhndlr(&rth, filter_fn, stdout,
+				      save_route_errhndlr, NULL) < 0) {
 		fprintf(stderr, "Dump terminated\n");
 		return -2;
 	}

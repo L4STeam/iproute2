@@ -1,10 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * nstat.c	handy utility to read counters /proc/net/netstat and snmp
- *
- *		This program is free software; you can redistribute it and/or
- *		modify it under the terms of the GNU General Public License
- *		as published by the Free Software Foundation; either version
- *		2 of the License, or (at your option) any later version.
  *
  * Authors:	Alexey Kuznetsov, <kuznet@ms2.inr.ac.ru>
  */
@@ -547,17 +543,17 @@ static void usage(void)
 {
 	fprintf(stderr,
 		"Usage: nstat [OPTION] [ PATTERN [ PATTERN ] ]\n"
-		"   -h, --help		this message\n"
-		"   -a, --ignore	ignore history\n"
-		"   -d, --scan=SECS	sample every statistics every SECS\n"
-		"   -j, --json		format output in JSON\n"
-		"   -n, --nooutput	do history only\n"
-		"   -p, --pretty	pretty print\n"
-		"   -r, --reset		reset history\n"
-		"   -s, --noupdate	don't update history\n"
-		"   -t, --interval=SECS	report average over the last SECS\n"
-		"   -V, --version	output version information\n"
-		"   -z, --zeros		show entries with zero activity\n");
+		"   -h, --help          this message\n"
+		"   -a, --ignore        ignore history\n"
+		"   -d, --scan=SECS     sample every statistics every SECS\n"
+		"   -j, --json          format output in JSON\n"
+		"   -n, --nooutput      do history only\n"
+		"   -p, --pretty        pretty print\n"
+		"   -r, --reset         reset history\n"
+		"   -s, --noupdate      don't update history\n"
+		"   -t, --interval=SECS report average over the last SECS\n"
+		"   -V, --version       output version information\n"
+		"   -z, --zeros         show entries with zero activity\n");
 	exit(-1);
 }
 

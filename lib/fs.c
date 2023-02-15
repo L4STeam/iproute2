@@ -1,13 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * fs.c         filesystem APIs
  *
- *		This program is free software; you can redistribute it and/or
- *		modify it under the terms of the GNU General Public License
- *		as published by the Free Software Foundation; either version
- *		2 of the License, or (at your option) any later version.
- *
  * Authors:	David Ahern <dsa@cumulusnetworks.com>
- *
  */
 
 #include <sys/types.h>
@@ -25,10 +20,35 @@
 
 #include "utils.h"
 
+#ifndef HAVE_HANDLE_AT
+# include <sys/syscall.h>
+#endif
+
 #define CGROUP2_FS_NAME "cgroup2"
 
 /* if not already mounted cgroup2 is mounted here for iproute2's use */
 #define MNT_CGRP2_PATH  "/var/run/cgroup2"
+
+
+#ifndef HAVE_HANDLE_AT
+struct file_handle {
+	unsigned handle_bytes;
+	int handle_type;
+	unsigned char f_handle[];
+};
+
+static int name_to_handle_at(int dirfd, const char *pathname,
+	struct file_handle *handle, int *mount_id, int flags)
+{
+	return syscall(__NR_name_to_handle_at, dirfd, pathname, handle,
+	               mount_id, flags);
+}
+
+static int open_by_handle_at(int mount_fd, struct file_handle *handle, int flags)
+{
+	return syscall(__NR_open_by_handle_at, mount_fd, handle, flags);
+}
+#endif
 
 /* return mount path of first occurrence of given fstype */
 static char *find_fs_mount(const char *fs_to_find)
@@ -313,6 +333,32 @@ int get_command_name(const char *pid, char *comm, size_t len)
 	}
 
 	fclose(fp);
+
+	return 0;
+}
+
+int get_task_name(pid_t pid, char *name, size_t len)
+{
+	char path[PATH_MAX];
+	FILE *f;
+
+	if (!pid)
+		return -1;
+
+	if (snprintf(path, sizeof(path), "/proc/%d/comm", pid) >= sizeof(path))
+		return -1;
+
+	f = fopen(path, "r");
+	if (!f)
+		return -1;
+
+	if (!fgets(name, len, f))
+		return -1;
+
+	/* comm ends in \n, get rid of it */
+	name[strcspn(name, "\n")] = '\0';
+
+	fclose(f);
 
 	return 0;
 }

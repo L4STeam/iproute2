@@ -1,10 +1,6 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * iplink_geneve.c	GENEVE device support
- *
- *              This program is free software; you can redistribute it and/or
- *              modify it under the terms of the GNU General Public License
- *              as published by the Free Software Foundation; either version
- *              2 of the License, or (at your option) any later version.
  *
  * Authors:     John W. Linville <linville@tuxdriver.com>
  */
@@ -31,6 +27,7 @@ static void print_explain(FILE *f)
 		"		[ [no]udpcsum ]\n"
 		"		[ [no]udp6zerocsumtx ]\n"
 		"		[ [no]udp6zerocsumrx ]\n"
+		"		[ innerprotoinherit ]\n"
 		"\n"
 		"Where:	VNI   := 0-16777215\n"
 		"	ADDR  := IP_ADDRESS\n"
@@ -72,6 +69,7 @@ static int geneve_parse_opt(struct link_util *lu, int argc, char **argv,
 	__u64 attrs = 0;
 	bool set_op = (n->nlmsg_type == RTM_NEWLINK &&
 		       !(n->nlmsg_flags & NLM_F_CREATE));
+	bool inner_proto_inherit = false;
 
 	inet_prefix_reset(&daddr);
 
@@ -182,6 +180,10 @@ static int geneve_parse_opt(struct link_util *lu, int argc, char **argv,
 			check_duparg(&attrs, IFLA_GENEVE_UDP_ZERO_CSUM6_RX,
 				     *argv, *argv);
 			udp6zerocsumrx = 0;
+		} else if (!strcmp(*argv, "innerprotoinherit")) {
+			check_duparg(&attrs, IFLA_GENEVE_INNER_PROTO_INHERIT,
+				     *argv, *argv);
+			inner_proto_inherit = true;
 		} else if (matches(*argv, "help") == 0) {
 			explain();
 			return -1;
@@ -231,6 +233,8 @@ static int geneve_parse_opt(struct link_util *lu, int argc, char **argv,
 		addattr16(n, 1024, IFLA_GENEVE_PORT, htons(dstport));
 	if (metadata)
 		addattr(n, 1024, IFLA_GENEVE_COLLECT_METADATA);
+	if (inner_proto_inherit)
+		addattr(n, 1024, IFLA_GENEVE_INNER_PROTO_INHERIT);
 	if (GENEVE_ATTRSET(attrs, IFLA_GENEVE_UDP_CSUM))
 		addattr8(n, 1024, IFLA_GENEVE_UDP_CSUM, udpcsum);
 	if (GENEVE_ATTRSET(attrs, IFLA_GENEVE_UDP_ZERO_CSUM6_TX))
@@ -243,7 +247,6 @@ static int geneve_parse_opt(struct link_util *lu, int argc, char **argv,
 
 static void geneve_print_opt(struct link_util *lu, FILE *f, struct rtattr *tb[])
 {
-	__u32 vni;
 	__u8 ttl = 0;
 	__u8 tos = 0;
 
@@ -252,15 +255,12 @@ static void geneve_print_opt(struct link_util *lu, FILE *f, struct rtattr *tb[])
 
 	if (tb[IFLA_GENEVE_COLLECT_METADATA]) {
 		print_bool(PRINT_ANY, "external", "external ", true);
-		return;
 	}
 
-	if (!tb[IFLA_GENEVE_ID] ||
-	    RTA_PAYLOAD(tb[IFLA_GENEVE_ID]) < sizeof(__u32))
-		return;
-
-	vni = rta_getattr_u32(tb[IFLA_GENEVE_ID]);
-	print_uint(PRINT_ANY, "id", "id %u ", vni);
+	if (tb[IFLA_GENEVE_ID] &&
+	    RTA_PAYLOAD(tb[IFLA_GENEVE_ID]) >= sizeof(__u32)) {
+		print_uint(PRINT_ANY, "id", "id %u ", rta_getattr_u32(tb[IFLA_GENEVE_ID]));
+	}
 
 	if (tb[IFLA_GENEVE_REMOTE]) {
 		__be32 addr = rta_getattr_u32(tb[IFLA_GENEVE_REMOTE]);
@@ -368,6 +368,11 @@ static void geneve_print_opt(struct link_util *lu, FILE *f, struct rtattr *tb[])
 				fputs("no", f);
 			fputs("udp6zerocsumrx ", f);
 		}
+	}
+
+	if (tb[IFLA_GENEVE_INNER_PROTO_INHERIT]) {
+		print_bool(PRINT_ANY, "inner_proto_inherit",
+			   "innerprotoinherit ", true);
 	}
 }
 

@@ -1,13 +1,8 @@
+/* SPDX-License-Identifier: GPL-2.0-or-later */
 /*
  * libnetlink.c	RTnetlink service routines.
  *
- *		This program is free software; you can redistribute it and/or
- *		modify it under the terms of the GNU General Public License
- *		as published by the Free Software Foundation; either version
- *		2 of the License, or (at your option) any later version.
- *
  * Authors:	Alexey Kuznetsov, <kuznet@ms2.inr.ac.ru>
- *
  */
 
 #include <stdio.h>
@@ -129,13 +124,12 @@ int nl_dump_ext_ack(const struct nlmsghdr *nlh, nl_ext_ack_fn_t errfn)
 	return 0;
 }
 
-int nl_dump_ext_ack_done(const struct nlmsghdr *nlh, int error)
+int nl_dump_ext_ack_done(const struct nlmsghdr *nlh, unsigned int offset, int error)
 {
 	struct nlattr *tb[NLMSGERR_ATTR_MAX + 1] = {};
-	unsigned int hlen = sizeof(int);
 	const char *msg = NULL;
 
-	if (mnl_attr_parse(nlh, hlen, err_attr_cb, tb) != MNL_CB_OK)
+	if (mnl_attr_parse(nlh, offset, err_attr_cb, tb) != MNL_CB_OK)
 		return 0;
 
 	if (tb[NLMSGERR_ATTR_MSG])
@@ -159,7 +153,7 @@ int nl_dump_ext_ack(const struct nlmsghdr *nlh, nl_ext_ack_fn_t errfn)
 	return 0;
 }
 
-int nl_dump_ext_ack_done(const struct nlmsghdr *nlh, int error)
+int nl_dump_ext_ack_done(const struct nlmsghdr *nlh, unsigned int offset, int error)
 {
 	return 0;
 }
@@ -210,13 +204,13 @@ int rtnl_open_byproto(struct rtnl_handle *rth, unsigned int subscriptions,
 	if (setsockopt(rth->fd, SOL_SOCKET, SO_SNDBUF,
 		       &sndbuf, sizeof(sndbuf)) < 0) {
 		perror("SO_SNDBUF");
-		return -1;
+		goto err;
 	}
 
 	if (setsockopt(rth->fd, SOL_SOCKET, SO_RCVBUF,
 		       &rcvbuf, sizeof(rcvbuf)) < 0) {
 		perror("SO_RCVBUF");
-		return -1;
+		goto err;
 	}
 
 	/* Older kernels may no support extended ACK reporting */
@@ -230,25 +224,28 @@ int rtnl_open_byproto(struct rtnl_handle *rth, unsigned int subscriptions,
 	if (bind(rth->fd, (struct sockaddr *)&rth->local,
 		 sizeof(rth->local)) < 0) {
 		perror("Cannot bind netlink socket");
-		return -1;
+		goto err;
 	}
 	addr_len = sizeof(rth->local);
 	if (getsockname(rth->fd, (struct sockaddr *)&rth->local,
 			&addr_len) < 0) {
 		perror("Cannot getsockname");
-		return -1;
+		goto err;
 	}
 	if (addr_len != sizeof(rth->local)) {
 		fprintf(stderr, "Wrong address length %d\n", addr_len);
-		return -1;
+		goto err;
 	}
 	if (rth->local.nl_family != AF_NETLINK) {
 		fprintf(stderr, "Wrong address family %d\n",
 			rth->local.nl_family);
-		return -1;
+		goto err;
 	}
 	rth->seq = time(NULL);
 	return 0;
+err:
+	rtnl_close(rth);
+	return -1;
 }
 
 int rtnl_open(struct rtnl_handle *rth, unsigned int subscriptions)
@@ -266,6 +263,32 @@ int rtnl_nexthopdump_req(struct rtnl_handle *rth, int family,
 	} req = {
 		.nlh.nlmsg_len = NLMSG_LENGTH(sizeof(struct nhmsg)),
 		.nlh.nlmsg_type = RTM_GETNEXTHOP,
+		.nlh.nlmsg_flags = NLM_F_DUMP | NLM_F_REQUEST,
+		.nlh.nlmsg_seq = rth->dump = ++rth->seq,
+		.nhm.nh_family = family,
+	};
+
+	if (filter_fn) {
+		int err;
+
+		err = filter_fn(&req.nlh, sizeof(req));
+		if (err)
+			return err;
+	}
+
+	return send(rth->fd, &req, sizeof(req), 0);
+}
+
+int rtnl_nexthop_bucket_dump_req(struct rtnl_handle *rth, int family,
+				 req_filter_fn_t filter_fn)
+{
+	struct {
+		struct nlmsghdr nlh;
+		struct nhmsg nhm;
+		char buf[128];
+	} req = {
+		.nlh.nlmsg_len = NLMSG_LENGTH(sizeof(struct nhmsg)),
+		.nlh.nlmsg_type = RTM_GETNEXTHOPBUCKET,
 		.nlh.nlmsg_flags = NLM_F_DUMP | NLM_F_REQUEST,
 		.nlh.nlmsg_seq = rth->dump = ++rth->seq,
 		.nhm.nh_family = family,
@@ -424,6 +447,25 @@ int rtnl_mdbdump_req(struct rtnl_handle *rth, int family)
 	return send(rth->fd, &req, sizeof(req), 0);
 }
 
+int rtnl_brvlandump_req(struct rtnl_handle *rth, int family, __u32 dump_flags)
+{
+	struct {
+		struct nlmsghdr nlh;
+		struct br_vlan_msg bvm;
+		char buf[256];
+	} req = {
+		.nlh.nlmsg_len = NLMSG_LENGTH(sizeof(struct br_vlan_msg)),
+		.nlh.nlmsg_type = RTM_GETVLAN,
+		.nlh.nlmsg_flags = NLM_F_DUMP | NLM_F_REQUEST,
+		.nlh.nlmsg_seq = rth->dump = ++rth->seq,
+		.bvm.family = family,
+	};
+
+	addattr32(&req.nlh, sizeof(req), BRIDGE_VLANDB_DUMP_FLAGS, dump_flags);
+
+	return send(rth->fd, &req, sizeof(req), 0);
+}
+
 int rtnl_netconfdump_req(struct rtnl_handle *rth, int family)
 {
 	struct {
@@ -571,12 +613,13 @@ int rtnl_fdb_linkdump_req_filter_fn(struct rtnl_handle *rth,
 	return send(rth->fd, &req, sizeof(req), 0);
 }
 
-int rtnl_statsdump_req_filter(struct rtnl_handle *rth, int fam, __u32 filt_mask)
+int rtnl_statsdump_req_filter(struct rtnl_handle *rth, int fam,
+			      __u32 filt_mask,
+			      int (*filter_fn)(struct ipstats_req *req,
+					       void *data),
+			      void *filter_data)
 {
-	struct {
-		struct nlmsghdr nlh;
-		struct if_stats_msg ifsm;
-	} req;
+	struct ipstats_req req;
 
 	memset(&req, 0, sizeof(req));
 	req.nlh.nlmsg_len = NLMSG_LENGTH(sizeof(struct if_stats_msg));
@@ -586,6 +629,14 @@ int rtnl_statsdump_req_filter(struct rtnl_handle *rth, int fam, __u32 filt_mask)
 	req.nlh.nlmsg_seq = rth->dump = ++rth->seq;
 	req.ifsm.family = fam;
 	req.ifsm.filter_mask = filt_mask;
+
+	if (filter_fn) {
+		int err;
+
+		err = filter_fn(&req, filter_data);
+		if (err)
+			return err;
+	}
 
 	return send(rth->fd, &req, sizeof(req), 0);
 }
@@ -673,7 +724,8 @@ int rtnl_dump_request_n(struct rtnl_handle *rth, struct nlmsghdr *n)
 	return sendmsg(rth->fd, &msg, 0);
 }
 
-static int rtnl_dump_done(struct nlmsghdr *h)
+static int rtnl_dump_done(struct nlmsghdr *h,
+			  const struct rtnl_dump_filter_arg *a)
 {
 	int len = *(int *)NLMSG_DATA(h);
 
@@ -683,11 +735,15 @@ static int rtnl_dump_done(struct nlmsghdr *h)
 	}
 
 	if (len < 0) {
+		errno = -len;
+
+		if (a->errhndlr && (a->errhndlr(h, a->arg2) & RTNL_SUPPRESS_NLMSG_DONE_NLERR))
+			return 0;
+
 		/* check for any messages returned from kernel */
-		if (nl_dump_ext_ack_done(h, len))
+		if (nl_dump_ext_ack_done(h, sizeof(int), len))
 			return len;
 
-		errno = -len;
 		switch (errno) {
 		case ENOENT:
 		case EOPNOTSUPP:
@@ -708,8 +764,9 @@ static int rtnl_dump_done(struct nlmsghdr *h)
 	return 0;
 }
 
-static void rtnl_dump_error(const struct rtnl_handle *rth,
-			    struct nlmsghdr *h)
+static int rtnl_dump_error(const struct rtnl_handle *rth,
+			    struct nlmsghdr *h,
+			    const struct rtnl_dump_filter_arg *a)
 {
 
 	if (h->nlmsg_len < NLMSG_LENGTH(sizeof(struct nlmsgerr))) {
@@ -721,11 +778,16 @@ static void rtnl_dump_error(const struct rtnl_handle *rth,
 		if (rth->proto == NETLINK_SOCK_DIAG &&
 		    (errno == ENOENT ||
 		     errno == EOPNOTSUPP))
-			return;
+			return -1;
+
+		if (a->errhndlr && (a->errhndlr(h, a->arg2) & RTNL_SUPPRESS_NLMSG_ERROR_NLERR))
+			return 0;
 
 		if (!(rth->flags & RTNL_HANDLE_F_SUPPRESS_NLERR))
 			perror("RTNETLINK answers");
 	}
+
+	return -1;
 }
 
 static int __rtnl_recvmsg(int fd, struct msghdr *msg, int flags)
@@ -834,7 +896,7 @@ static int rtnl_dump_filter_l(struct rtnl_handle *rth,
 					dump_intr = 1;
 
 				if (h->nlmsg_type == NLMSG_DONE) {
-					err = rtnl_dump_done(h);
+					err = rtnl_dump_done(h, a);
 					if (err < 0) {
 						free(buf);
 						return -1;
@@ -845,9 +907,13 @@ static int rtnl_dump_filter_l(struct rtnl_handle *rth,
 				}
 
 				if (h->nlmsg_type == NLMSG_ERROR) {
-					rtnl_dump_error(rth, h);
-					free(buf);
-					return -1;
+					err = rtnl_dump_error(rth, h, a);
+					if (err < 0) {
+						free(buf);
+						return -1;
+					}
+
+					goto skip_it;
 				}
 
 				if (!rth->dump_fp) {
@@ -883,12 +949,34 @@ skip_it:
 }
 
 int rtnl_dump_filter_nc(struct rtnl_handle *rth,
-		     rtnl_filter_t filter,
-		     void *arg1, __u16 nc_flags)
+			rtnl_filter_t filter,
+			void *arg1, __u16 nc_flags)
 {
-	const struct rtnl_dump_filter_arg a[2] = {
-		{ .filter = filter, .arg1 = arg1, .nc_flags = nc_flags, },
-		{ .filter = NULL,   .arg1 = NULL, .nc_flags = 0, },
+	const struct rtnl_dump_filter_arg a[] = {
+		{
+			.filter = filter, .arg1 = arg1,
+			.nc_flags = nc_flags,
+		},
+		{ },
+	};
+
+	return rtnl_dump_filter_l(rth, a);
+}
+
+int rtnl_dump_filter_errhndlr_nc(struct rtnl_handle *rth,
+		     rtnl_filter_t filter,
+		     void *arg1,
+		     rtnl_err_hndlr_t errhndlr,
+		     void *arg2,
+		     __u16 nc_flags)
+{
+	const struct rtnl_dump_filter_arg a[] = {
+		{
+			.filter = filter, .arg1 = arg1,
+			.errhndlr = errhndlr, .arg2 = arg2,
+			.nc_flags = nc_flags,
+		},
+		{ },
 	};
 
 	return rtnl_dump_filter_l(rth, a);
@@ -999,14 +1087,19 @@ next:
 						rtnl_talk_error(h, err, errfn);
 				}
 
+				if (i < iovlen) {
+					free(buf);
+					goto next;
+				}
+
+				if (error) {
+					free(buf);
+					return -i;
+				}
+
 				if (answer)
 					*answer = (struct nlmsghdr *)buf;
-				else
-					free(buf);
-
-				if (i < iovlen)
-					goto next;
-				return error ? -i : 0;
+				return 0;
 			}
 
 			if (answer) {
@@ -1043,6 +1136,28 @@ static int __rtnl_talk(struct rtnl_handle *rtnl, struct nlmsghdr *n,
 	};
 
 	return __rtnl_talk_iov(rtnl, &iov, 1, answer, show_rtnl_err, errfn);
+}
+
+int rtnl_echo_talk(struct rtnl_handle *rtnl, struct nlmsghdr *n, int json,
+		   int (*print_info)(struct nlmsghdr *n, void *arg))
+{
+	struct nlmsghdr *answer;
+	int ret;
+
+	n->nlmsg_flags |= NLM_F_ECHO | NLM_F_ACK;
+
+	ret = rtnl_talk(rtnl, n, &answer);
+	if (ret)
+		return ret;
+
+	new_json_obj(json);
+	open_json_object(NULL);
+	print_info(answer, stdout);
+	close_json_object();
+	delete_json_obj();
+	free(answer);
+
+	return 0;
 }
 
 int rtnl_talk(struct rtnl_handle *rtnl, struct nlmsghdr *n,
@@ -1093,15 +1208,15 @@ int rtnl_listen(struct rtnl_handle *rtnl,
 	char   buf[16384];
 	char   cmsgbuf[BUFSIZ];
 
-	if (rtnl->flags & RTNL_HANDLE_F_LISTEN_ALL_NSID) {
-		msg.msg_control = &cmsgbuf;
-		msg.msg_controllen = sizeof(cmsgbuf);
-	}
-
 	iov.iov_base = buf;
 	while (1) {
 		struct rtnl_ctrl_data ctrl;
 		struct cmsghdr *cmsg;
+
+		if (rtnl->flags & RTNL_HANDLE_F_LISTEN_ALL_NSID) {
+			msg.msg_control = &cmsgbuf;
+			msg.msg_controllen = sizeof(cmsgbuf);
+		}
 
 		iov.iov_len = sizeof(buf);
 		status = recvmsg(rtnl->fd, &msg, 0);
@@ -1514,4 +1629,24 @@ void nl_print_policy(const struct rtattr *attr, FILE *fp)
 					rta_getattr_u32(tp[NL_POLICY_TYPE_ATTR_MAX_LENGTH]));
 		}
 	}
+}
+
+int rtnl_tunneldump_req(struct rtnl_handle *rth, int family, int ifindex,
+			__u8 flags)
+{
+	struct {
+		struct nlmsghdr nlh;
+		struct tunnel_msg tmsg;
+		char buf[256];
+	} req = {
+		.nlh.nlmsg_len = NLMSG_LENGTH(sizeof(struct tunnel_msg)),
+		.nlh.nlmsg_type = RTM_GETTUNNEL,
+		.nlh.nlmsg_flags = NLM_F_DUMP | NLM_F_REQUEST,
+		.nlh.nlmsg_seq = rth->dump = ++rth->seq,
+		.tmsg.family = family,
+		.tmsg.flags = flags,
+		.tmsg.ifindex = ifindex,
+	};
+
+	return send(rth->fd, &req, sizeof(req), 0);
 }
