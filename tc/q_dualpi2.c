@@ -1,13 +1,25 @@
 /* SPDX-License-Identifier: GPL-2.0 */
 /* Copyright (C) 2019 Nokia.
  *
- * DualQ PI Improved with a Square (dualpi2)
- * Supports controlling scalable congestion controls (DCTCP, etc...)
- * Supports DualQ with PI2
- * Supports L4S ECN identifier
  * Author: Koen De Schepper <koen.de_schepper@nokia-bell-labs.com>
  * Author: Olga Albisser <olga@albisser.org>
  * Author: Henrik Steen <henrist@henrist.net>
+ * Author: Olivier Tilmans <olivier.tilmans@nokia-bell-labs.com>
+ *
+ * DualPI Improved with a Square (dualpi2):
+ * - Supports congestion controls that comply with the Prague requirements
+ *   in RFC9331 (e.g. TCP-Prague)
+ * - Supports coupled dual-queue with PI2 as defined in RFC9332
+ * - Supports ECN L4S-identifier (IP.ECN==0b*1)
+ *
+ * note: DCTCP is not Prague compliant, so DCTCP & DualPI2 can only be
+ *   used in DC context; BBRv3 (overwrites bbr) stopped Prague support,
+ *   you should use TCP-Prague instead for low latency apps
+ *
+ * References:
+ * - RFC9332: https://datatracker.ietf.org/doc/html/rfc9332
+ * - De Schepper, Koen, et al. "PI 2: A linearized AQM for both classic and
+ *   scalable TCP."  in proc. ACM CoNEXT'16, 2016.
  */
 
 #include <stdio.h>
