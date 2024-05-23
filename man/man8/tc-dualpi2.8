@@ -1,4 +1,4 @@
-.TH DUALPI2 8 "13 December 2018" "iproute2" "Linux"
+.TH DUALPI2 8 "23 May 2024" "iproute2" "Linux"
 
 .SH NAME
 DUALPI2 \- Dual Queue Proportional Integral Controller AQM - Improved with a square
@@ -47,7 +47,7 @@ DUALPI2 \- Dual Queue Proportional Integral Controller AQM - Improved with a squ
 .RB "[ " split_gso " | " no_split_gso " ]"
 
 .SH DESCRIPTION
-DUALPI2 AQM is a combination of the DUALQ Coupled-AQM with a PI2 base-AQM. The PI2 AQM (details can be found in the paper cited below) is in turn both an extension and a simplification of the PIE AQM. PI2 makes quite some PIE heuristics unnecessary, while being able to control scalable congestion controls like DCTCP and TCP-Prague. With PI2, both Reno/Cubic can be used in parallel with DCTCP, maintaining window fairness. DUALQ provides latency separation between low latency DCTCP flows and Reno/Cubic flows that need a bigger queue. The main design goals are:
+DUALPI2 AQM is a combination of the DUALQ Coupled-AQM with a PI2 base-AQM. The PI2 AQM (details can be found in the paper cited below) is in turn both an extension and a simplification of the PIE AQM. PI2 makes quite some PIE heuristics unnecessary, while being able to control scalable congestion controls like TCP-Prague. With PI2, both Reno/Cubic can be used in parallel with Prague, maintaining window fairness. DUALQ provides latency separation between low latency Prague flows and Reno/Cubic flows that need a bigger queue. The main design goals are:
 .PD 0
 .IP \(bu 4
 L4S - Low Loss, Low Latency and Scalable congestion control support
@@ -86,7 +86,7 @@ If DUALPI2 AQM has detected overload (when excessive non-responsive traffic is s
 .RB "" overflow
 (like tail-drop).
 
-Additional details can be found in the draft cited below.
+Additional details can be found in the RFC cited below.
 
 .SH PARAMETERS
 .TP
@@ -105,7 +105,7 @@ Configures the ECT classifier. Packets whose ECT codepoint matches this are sent
 .I l4s_ect
 , i.e., the L4S identifier ECT(1). Setting this to
 .I any_ect
-causes all packets whose ECN field is not zero to be sent to the L4S queue. This enables to be backward compatible with, e.g., DCTCP.
+causes all packets whose ECN field is not zero to be sent to the L4S queue. This enables to be backward compatible with, e.g., DCTCP. Note DCTCP should only be used for intra-DC traffic with very low RTTs and AQM delay targets bigger than those RTTs, separated from Internet traffic (also if Prague), as it does not support all Prague requirements that make sure that a congestion control can work well with the range of RTTs on the Internet. 
 .PD
 .BI step_thresh " TIME | PACKETS"
 Set the step threshold for the L4S queue. This will cause packets with a sojourn time exceeding the threshold to always be marked. This value can either be specified using time units (i.e., us, ms, s), or in packets (pkt, packet(s)). A velue without units is assumed to be in time (us). If defining the step in packets, be sure to disable GRO on the ingress interfaces. Defaults to
@@ -131,7 +131,7 @@ based L4S marking is always at dequeue. Defaults to
 .PD
 .TP
 .BI classic_protection " PERCENTAGE
-Protects the classic queue from unresponsive traffic in the L4S queue. This bounds the maximal delay in the C queue to be
+Protects the classic queue from unresponsive traffic in the L4S queue. This bounds the maximal scheduling delay in the C queue to be
 .I (100 - PERCENTAGE)
 times greater than the one in the L queue. Defaults to
 .I 10
@@ -168,7 +168,7 @@ ms.
 .BI tupdate " TIME"
 Set the frequency at which the system drop probability is calculated. Defaults to
 .I 16
-ms. This should be a third of the max RTT supported.
+ms. This should be less than a third of the max RTT supported.
 .TP
 .BI alpha " float"
 .PD 0
@@ -179,7 +179,9 @@ Set alpha and beta, the integral and proportional gain factors in Hz for the PI 
 .I 0.16
 and
 .I 3.2
-Hz, which provide stable control for RTT's up to 100ms with tupdate of 16. Be aware, unlike with PIE, these are the real unscaled gain factors.
+Hz, which provide stable control for RTT's up to 100ms with tupdate of 16. Be aware, unlike with PIE, these are the real unscaled gain factors. If not provided, they will be automatically derived from
+.I typical_rtt and max_rtt
+, if one of them or both are provided.
 .PD
 .TP
 .B split_gso | no_split_gso
@@ -224,7 +226,7 @@ Finally, all the other classid/priority map to the classic queue.
 
 .SH SOURCES
 .IP \(bu 4
-IETF draft submission is at https://www.ietf.org/id/draft-ietf-tsvwg-aqm-dualq-coupled
+IETF RFC9332 : https://datatracker.ietf.org/doc/html/rfc9332
 .IP \(bu 4
 CoNEXT '16 Proceedings of the 12th International on Conference on emerging Networking EXperiments and Technologies : "PI2: A
 Linearized AQM for both Classic and Scalable TCP"
